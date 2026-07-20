@@ -1,55 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
-/* 디자인 토큰 — 클린 미니멀 (Stripe×Apple)
-   밝은 배경 + 뉴트럴 그레이 + 포인트 1색(블루퍼플), 넓은 여백, 부드러운 모서리 */
+/* 디자인 토큰 — Mistral AI (mistral.ai 실사이트 톤)
+   웜 베이지 배경 + 근흑 텍스트 + 비비드 오렌지(#FF7000) 액센트,
+   고대비·무장식, Inter 볼드 헤드라인 + JetBrains Mono 코드 */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.55 0.22 277);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.7 0.14 277);
-  --radius: 0.625rem;
-  --success: oklch(0.627 0.17 149.2);
-  --success-foreground: oklch(0.985 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: #f7f5ef;
+  --foreground: #1a1a1a;
+  --card: #ffffff;
+  --card-foreground: #1a1a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1a;
+  --primary: #d9730d;
+  --primary-foreground: #ffffff;
+  --secondary: #eceadf;
+  --secondary-foreground: #1a1a1a;
+  --muted: #eceadf;
+  --muted-foreground: #6b6862;
+  --accent: #eceadf;
+  --accent-foreground: #1a1a1a;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2dfd4;
+  --input: #e2dfd4;
+  --ring: #d9730d;
+  --radius: 0.5rem;
+  --success: #22c55e;
+  --success-foreground: #ffffff;
 }
 
 @theme inline {
@@ -75,8 +55,10 @@
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --font-sans:
-    'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
-    'Segoe UI', 'Malgun Gothic', sans-serif;
+    'Inter', 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+    'Apple SD Gothic Neo', 'Segoe UI', 'Malgun Gothic', sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'D2Coding', monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -87,7 +69,17 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Tailwind v4 preflight가 버튼 커서를 default로 바꿔놓아 포인터로 복원 */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
   body {
     @apply bg-background font-sans text-foreground antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-bold tracking-tight;
   }
 }
