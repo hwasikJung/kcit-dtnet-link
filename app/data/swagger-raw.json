@@ -1,0 +1,1071 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "SQI Soft Address API",
+    "version": "1.0.0"
+  },
+  "tags": [
+    {
+      "name": "TTA"
+    },
+    {
+      "name": "주소정제"
+    },
+    {
+      "name": "주소매칭"
+    },
+    {
+      "name": "건물매칭"
+    },
+    {
+      "name": "법정동코드와 좌표"
+    },
+    {
+      "name": "좌표변환"
+    },
+    {
+      "name": "에너지매칭"
+    },
+    {
+      "name": "PK변환"
+    },
+    {
+      "name": "외부API제공"
+    }
+  ],
+  "paths": {
+    "/sqiapi/addr/asis/sgis": {
+      "get": {
+        "summary": "SGIS 지오코딩",
+        "description": "SGIS(통계청) 지오코딩 API의 결과를 그대로 제공",
+        "tags": [
+          "외부API제공"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SGIS 결과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/asis/kakao": {
+      "get": {
+        "summary": "Kakao 주소검색",
+        "description": "Kakao 주소검색 API의 결과를 그대로 제공",
+        "tags": [
+          "외부API제공"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Kakao 결과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/asis/juso": {
+      "get": {
+        "summary": "주소기반산업지원서비스 도로명 주소",
+        "description": "주소기반산업지원서비스(행전안전부) 도로명 주소 API의 결과를 그대로 제공",
+        "tags": [
+          "외부API제공"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "주소기반산업지원서비스 결과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/asis/all": {
+      "get": {
+        "summary": "SGIS, Kakao, 주소기반산업지원서비스 동시 조회",
+        "description": "SGIS, Kakao, 주소기반산업지원서비스 API의 결과를 그대로 제공",
+        "tags": [
+          "외부API제공"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SGIS, Kakao, 주소기반산업지원서비스 API 결과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/addr_clean": {
+      "get": {
+        "summary": "주소 정제 (실제 주소 매칭으로 정제)",
+        "description": "SGIS, Kakao, 주소기반산업지원서비스, 자체주소정제 순",
+        "tags": [
+          "주소정제"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정제된 주소, 주소 정제의 출처",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/addr_clean/sqi": {
+      "get": {
+        "summary": "자체주소 정제 (형식만 정제)",
+        "description": "자체주소정제",
+        "tags": [
+          "주소정제"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string",
+              "default": "서울특별시 강남구 논현로64길 7(역삼동 776-8번지, 역삼청소년수련관  ) 역삼청소년수련관"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isRemoveNextLine",
+            "required": false,
+            "description": "줄바꿈 문자 삭제 여부(default true)",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          {
+            "in": "query",
+            "name": "isChageMultiSpaceToSingle",
+            "required": false,
+            "description": "여러개 공백 한개로 바꿈 여부(default true)",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isRemoveAfterParenthesis",
+            "required": false,
+            "description": "괄호 이후 삭제 여부(default true)",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isRemoveAfterComma",
+            "required": false,
+            "description": "콤마 이후 삭제 여부(default true)",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isRemoveRoGilSpace",
+            "required": false,
+            "description": "~로 n길 일 때 사이 공백 삭제 여부(default false)",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정제된 주소",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/legcd_n_coord": {
+      "get": {
+        "summary": "법정동코드, 좌표 (SGIS, Kakao, 주소기반산업지원서비스 순)",
+        "description": "WGS84(EPSG:4326) 좌표 (SGIS, Kakao, 주소기반산업지원서비스 순)",
+        "tags": [
+          "법정동코드와 좌표"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "법정동 코드와 WGS84(EPSG 4326)좌표(x,y), 변환시 전 좌표(ori_x,ori_y)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/legcd_n_coord/sgis": {
+      "get": {
+        "summary": "법정동코드, 좌표 (SGIS지오코딩API사용, SGIS좌표변환API)",
+        "description": "WGS84(EPSG:4326) 좌표로 변환",
+        "tags": [
+          "법정동코드와 좌표"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "법정동 코드와 WGS84(EPSG:4326)좌표(x,y), 변환 전 좌표(EPSG:5179,ori_x,ori_y)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/legcd_n_coord/sgis/multi": {
+      "get": {
+        "summary": "법정동코드, 좌표 (SGIS지오코딩API사용, SGIS좌표변환API) !!여러개 요청 가능!!",
+        "description": "WGS84(EPSG:4326) 좌표로 변환",
+        "tags": [
+          "법정동코드와 좌표"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소 ex:[\"미사대로 510\",\"비산동 111-24\"]",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "json 배열, 법정동 코드와 WGS84(EPSG:4326)좌표(x,y), 변환 전 좌표(EPSG:5179,ori_x,ori_y)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/legcd_n_coord/kakao": {
+      "get": {
+        "summary": "법정동코드, 좌표 (Kakao주소검색API사용)",
+        "description": "WGS84(EPSG:4326) 좌표 그대로 제공",
+        "tags": [
+          "법정동코드와 좌표"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "법정동 코드와 WGS84(EPSG:4326)좌표(x,y)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/legcd_n_coord/juso": {
+      "get": {
+        "summary": "법정동코드, 좌표 (주소기반산업지원서비스API사용, 자체좌표변환함수사용)",
+        "description": "WGS84(EPSG:4326) 좌표로 변환",
+        "tags": [
+          "법정동코드와 좌표"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "법정동 코드와 WGS84(EPSG:4326)좌표(x,y), 변환 전 좌표(EPSG:5179,ori_x,ori_y)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/transcoord": {
+      "get": {
+        "summary": "좌표계 변환 (SGIS, 자체 좌표변환 순)",
+        "description": "SGIS 좌표변환 실패시, 자체 좌표변환 사용",
+        "tags": [
+          "좌표변환"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "src",
+            "required": true,
+            "description": "현재 좌표계, EPSG 코드 사용 \n- BESSEL 경/위도............EPSG:4004, EPSG:4162\n- WGS84 경/위도.............EPSG:4326, EPSG:4166\n- 서부원점(GRS80)...........EPSG:5185\n- 중부원점(GRS80)...........EPSG:5181, EPSG:5186\n- 동부원점(GRS80)...........EPSG:5187\n- 동해(울릉)원점(GRS80).....EPSG:5188\n- UTM-K (GRS80)............EPSG:5179\n- Google Mercator..........EPSG:900913 \n",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dst",
+            "required": true,
+            "description": "변환할 좌표계, EPSG 코드",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "x",
+            "required": true,
+            "description": "x값",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "y",
+            "required": true,
+            "description": "y값",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "변환된 좌표 x, y",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/transcoord/sgis": {
+      "get": {
+        "summary": "SGIS 좌표계 변환",
+        "description": "SGIS 좌표변환 사용",
+        "tags": [
+          "좌표변환"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "src",
+            "required": true,
+            "description": "현재 좌표계, EPSG 코드 사용 \n- BESSEL 경/위도............EPSG:4004, EPSG:4162\n- WGS84 경/위도.............EPSG:4326, EPSG:4166\n- 서부원점(GRS80)...........EPSG:5185\n- 중부원점(GRS80)...........EPSG:5181, EPSG:5186\n- 동부원점(GRS80)...........EPSG:5187\n- 동해(울릉)원점(GRS80).....EPSG:5188\n- UTM-K (GRS80)............EPSG:5179\n- Google Mercator..........EPSG:900913\n",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dst",
+            "required": true,
+            "description": "변환할 좌표계, EPSG 코드",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "x",
+            "required": true,
+            "description": "x값",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "y",
+            "required": true,
+            "description": "y값",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "변환된 좌표 x, y",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/transcoord/sqi": {
+      "get": {
+        "summary": "자체 좌표 변환",
+        "description": "자체 좌표변환 사용",
+        "tags": [
+          "좌표변환"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "src",
+            "required": true,
+            "description": "현재 좌표계, EPSG 코드 사용 \n- BESSEL 경/위도............EPSG:4004, EPSG:4162\n- WGS84 경/위도.............EPSG:4326, EPSG:4166\n- 서부원점(GRS80)...........EPSG:5185\n- 중부원점(GRS80)...........EPSG:5181, EPSG:5186\n- 동부원점(GRS80)...........EPSG:5187\n- 동해(울릉)원점(GRS80).....EPSG:5188\n- UTM-K (GRS80)............EPSG:5179\n- Google Mercator..........EPSG:900913\n",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dst",
+            "required": true,
+            "description": "변환할 좌표계, EPSG 코드",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "x",
+            "required": true,
+            "description": "x값",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "y",
+            "required": true,
+            "description": "y값",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "변환된 좌표 x, y",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/addr_match": {
+      "get": {
+        "summary": "주소 정보 제공",
+        "description": "주소기반산업지원서비스API 실패 시 SGIS 사용하여 정제된 주소로 다시 주소기반산업지원서비스API 시도",
+        "tags": [
+          "주소매칭"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "주소기반산업지원서비스API 첫번째 주소 데이터",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/addr_clean_match": {
+      "get": {
+        "summary": "주소 정제 후 주소 정보 제공",
+        "description": "주소기반산업지원서비스API 실패 시 SGIS 사용하여 정제된 주소로 다시 주소기반산업지원서비스API 시도",
+        "tags": [
+          "주소매칭"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "주소기반산업지원서비스API 첫번째 주소 데이터",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/mgm_bld_pk_info/{mgmbldpk}": {
+      "get": {
+        "summary": "건축물대장 정보 조회",
+        "description": null,
+        "tags": [
+          "건물매칭"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mgmbldpk",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "mgmbldpk (총괄표제부, 표제부, 전유부)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "건축물대장 정보 조회 기본개요와 해당 테이블의 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/building_match_clean_union": {
+      "get": {
+        "summary": "주소정제 후 건축물대장번호 매칭 (3차년도 매칭)",
+        "description": null,
+        "tags": [
+          "건물매칭"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "건축물대장번호 매칭 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/building_match_union": {
+      "get": {
+        "summary": "건축물대장번호 매칭 (3차년도 매칭)",
+        "description": null,
+        "tags": [
+          "건물매칭"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "input_addr",
+            "required": true,
+            "description": "텍스트 주소",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "건축물대장번호 매칭 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/building_match_by_pnu/{pnu}": {
+      "get": {
+        "summary": "(수정예정) 건축물대장번호 매칭 정보 pnu로 찾기",
+        "description": null,
+        "tags": [
+          "건물매칭"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pnu",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "pnu code"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "건축물대장번호 매칭 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/building_match_with_juso_part": {
+      "get": {
+        "summary": "(수정예정) 주소요소로 건축물대장번호 매칭 정보 찾기",
+        "description": null,
+        "tags": [
+          "건물매칭"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "admcd",
+            "required": true,
+            "description": "법정동코드",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lnbrmnnm",
+            "required": true,
+            "description": "지번주소 번",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lnbrslno",
+            "required": true,
+            "description": "지번주소 지",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rnmgtsn",
+            "required": true,
+            "description": "도로명코드",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "buldmnnm",
+            "required": true,
+            "description": "도로명주소 본번",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "buldslno",
+            "required": true,
+            "description": "도로명주소 부번",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "건축물대장번호 매칭 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/energe_usage_match/{best_or_dtnet}/{energy_type}/{yyyy}": {
+      "get": {
+        "summary": "(삭제예정)월별 에너지 사용량 정보 제공",
+        "description": null,
+        "tags": [
+          "에너지매칭"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "best_or_dtnet",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "best or dtnet"
+          },
+          {
+            "in": "path",
+            "name": "energy_type",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "Energy type ,로 여러개 가능   예시)  03,04,06 \n- 01: 전기 kWh  \n- 03: 지역냉난방 Gcal  \n- 04: 지역냉난방 MWh  \n- 06: 지역냉난방 Mcal   \n- 08: 도시가스(LNG) MJ   \n- 14: 도시가스(LNG) Nm3(제주)\n"
+          },
+          {
+            "in": "path",
+            "name": "yyyy",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "Year in YYYY format."
+          },
+          {
+            "in": "query",
+            "name": "input_addr",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "Input address."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "월별 에너지 사용량 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/energe_usage_match/dtnet/oneline_elec_f20_t22": {
+      "get": {
+        "summary": "(삭제예정) DtNet용 월별 에너지 사용량 정보 제공, 2020년~2022년 전기 한줄로 쭉",
+        "description": null,
+        "tags": [
+          "에너지매칭"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mgm_bld_pk",
+            "required": true,
+            "description": "건축물대장PK (총괄표제부 혹은 표제부)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DtNet용 월별 에너지 사용량 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/tta_match": {
+      "post": {
+        "summary": "TTA 건축물대장 매칭",
+        "description": "CSV 파일을 업로드하여 건축물대장 매칭을 수행합니다.\n\n**입력 CSV 필수 컬럼 (EUC-KR 인코딩)**\n- `place_code` : 기관 코드\n- `place_name` : 기관명\n- `input_addr` : 주소\n",
+        "tags": [
+          "TTA"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "csvfile": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "EUC-KR 인코딩 CSV (필수 컬럼: place_code, place_name, input_addr)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "매칭 완료"
+          },
+          "500": {
+            "description": "매칭 처리 오류"
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/convert_mgm_bld_pk_old_to_new": {
+      "get": {
+        "summary": "기존 건축물대장 PK → 신규 PK 변환",
+        "tags": [
+          "PK변환"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mgm_bld_pk",
+            "required": true,
+            "description": "기존 건축물대장 PK",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "변환된 신규 pk 값",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sqiapi/addr/convert_mgm_bld_pk_new_to_old": {
+      "get": {
+        "summary": "신규 PK → 기존 건축물대장 PK 변환",
+        "tags": [
+          "PK변환"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mgm_bld_pk_new",
+            "required": true,
+            "description": "신규 건축물대장 PK",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "기존 PK 및 주소 정보",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {}
+}
