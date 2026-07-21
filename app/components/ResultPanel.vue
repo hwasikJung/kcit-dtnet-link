@@ -46,7 +46,7 @@ const isOk = computed(() => props.result?.status != null && props.result.status 
     >
       <p class="text-3xl">🧭</p>
       <p class="text-sm leading-relaxed">
-        좌측에서 기능을 선택하고 <span class="font-medium text-foreground">실행</span>을 누르면<br />
+        기능을 선택하고 <span class="font-medium text-foreground">실행</span>을 누르면<br />
         결과(JSON)가 여기에 표시됩니다.
       </p>
     </div>

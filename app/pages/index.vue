@@ -18,6 +18,7 @@ const callHistory = useCallHistory()
 const selected = ref<ApiEndpoint | null>(null)
 const loading = ref(false)
 const result = ref<RunResult | null>(null)
+const resultSection = ref<HTMLElement | null>(null)
 
 // 이력 복원용 — restoreValues가 있으면 ParamForm을 리마운트(formKey)해 초기값을 주입한다
 const restoreValues = ref<Record<string, string | boolean> | null>(null)
@@ -106,6 +107,12 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
     loading.value = false
   }
 
+  // 태블릿·모바일(상하 스택)에서는 결과가 화면 밖에 있으므로 결과 영역으로 스크롤
+  if (window.matchMedia('(max-width: 1023px)').matches) {
+    await nextTick()
+    resultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   if (result.value) {
     callHistory.add({
       method: e.method,
@@ -120,9 +127,10 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
 </script>
 
 <template>
-  <!-- 데스크톱(lg~): 좌우 2분할 고정 높이 / 태블릿·모바일: 상하 스택 + 페이지 스크롤 -->
+  <!-- 데스크톱(lg~): 좌우 2분할 고정 높이 / 태블릿·모바일: 상하 스택 + 페이지 스크롤
+       -1px: 헤더 실제 높이 = h-14 + border-b -->
   <main
-    class="mx-auto flex w-full max-w-screen-2xl flex-col lg:grid lg:h-[calc(100vh-3.5rem)] lg:grid-cols-[minmax(340px,420px)_1fr]"
+    class="mx-auto flex w-full max-w-screen-2xl flex-col lg:grid lg:h-[calc(100vh-3.5rem-1px)] lg:grid-cols-[minmax(340px,420px)_1fr]"
   >
     <!-- 호출 영역 -->
     <section class="flex flex-col border-b lg:min-h-0 lg:border-b-0 lg:border-r">
@@ -156,8 +164,8 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
       </div>
     </section>
 
-    <!-- 결과 영역 -->
-    <section class="min-h-[40dvh] lg:min-h-0">
+    <!-- 결과 영역 (scroll-mt: 스크롤 이동 시 sticky 헤더에 가려지지 않게) -->
+    <section ref="resultSection" class="min-h-[40dvh] scroll-mt-14 lg:min-h-0">
       <ResultPanel :result="result" :loading="loading" />
     </section>
 

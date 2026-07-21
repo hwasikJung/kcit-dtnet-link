@@ -44,6 +44,27 @@ const summary = computed(() => ({
   error: rows.value.filter((r) => r.status === 'error').length,
 }))
 
+// 조회 중 새로고침·탭 닫기·페이지 이동으로 진행분이 유실되는 것을 방지
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!running.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+onBeforeRouteLeave(() => {
+  if (!running.value) return true
+  return window.confirm('일괄 조회가 진행 중입니다. 페이지를 벗어나면 진행 중인 결과가 사라집니다.')
+})
+
+async function downloadSample() {
+  const XLSX = await import('xlsx')
+  const aoa = [['mgmBldPk'], ['11680-12777'], ['11680-12778']]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '샘플')
+  XLSX.writeFile(wb, '일괄조회_샘플.xlsx')
+}
+
 async function onFileChange(ev: Event) {
   const input = ev.target as HTMLInputElement
   const file = input.files?.[0]
@@ -240,6 +261,7 @@ function formatDate(ts: number) {
           aria-label="일괄 조회용 엑셀 파일"
           @change="onFileChange"
         />
+        <Button variant="outline" @click="downloadSample">샘플 파일 받기</Button>
         <span v-if="fileName" class="text-sm">{{ fileName }}</span>
         <span class="text-xs text-muted-foreground">
           A열 = mgmBldPk · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행

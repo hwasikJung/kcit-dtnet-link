@@ -112,5 +112,8 @@ function onFileChange(ev: Event) {
     <Button class="w-full" :disabled="!canRun" @click="emit('run', { ...values }, file)">
       {{ loading ? '호출 중…' : '실행' }}
     </Button>
+    <p v-if="!loading && !canRun" class="text-center text-xs text-muted-foreground">
+      필수 항목(<span class="text-red-700">*</span>)을 모두 입력하면 실행할 수 있습니다.
+    </p>
   </div>
 </template>

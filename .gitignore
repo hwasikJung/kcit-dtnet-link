@@ -10,5 +10,6 @@ dist
 # IDE / 로컬 아티팩트
 .idea
 .playwright-mcp
+
 docs/.obsidian
 .github/

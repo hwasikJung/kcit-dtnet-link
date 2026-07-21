@@ -9,14 +9,14 @@
         <nav class="flex items-center gap-1 text-sm">
           <NuxtLink
             to="/"
-            class="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
+            class="whitespace-nowrap rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
             exact-active-class="bg-secondary !text-foreground font-medium"
           >
             단건 조회
           </NuxtLink>
           <NuxtLink
             to="/bulk"
-            class="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
+            class="whitespace-nowrap rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
             exact-active-class="bg-secondary !text-foreground font-medium"
           >
             일괄 조회
