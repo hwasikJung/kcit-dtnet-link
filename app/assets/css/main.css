@@ -6,7 +6,9 @@
 
 /* 디자인 토큰 — Mistral AI (mistral.ai 실사이트 톤)
    웜 베이지 배경 + 근흑 텍스트 + 비비드 오렌지(#FF7000) 액센트,
-   고대비·무장식, Inter 볼드 헤드라인 + JetBrains Mono 코드 */
+   고대비·무장식, Inter 볼드 헤드라인 + JetBrains Mono 코드
+   ※ WCAG AA(4.5:1) 충족을 위해 primary는 흰 글자 기준 4.5:1을 넘는
+     진한 주황(#b85c00), success/destructive는 700 계열 사용 (2026-07-21 접근성 점검) */
 :root {
   --background: #f7f5ef;
   --foreground: #1a1a1a;
@@ -14,7 +16,7 @@
   --card-foreground: #1a1a1a;
   --popover: #ffffff;
   --popover-foreground: #1a1a1a;
-  --primary: #d9730d;
+  --primary: #b85c00;
   --primary-foreground: #ffffff;
   --secondary: #eceadf;
   --secondary-foreground: #1a1a1a;
@@ -22,13 +24,13 @@
   --muted-foreground: #6b6862;
   --accent: #eceadf;
   --accent-foreground: #1a1a1a;
-  --destructive: #ef4444;
+  --destructive: #b91c1c;
   --destructive-foreground: #ffffff;
   --border: #e2dfd4;
   --input: #e2dfd4;
-  --ring: #d9730d;
+  --ring: #b85c00;
   --radius: 0.5rem;
-  --success: #22c55e;
+  --success: #15803d;
   --success-foreground: #ffffff;
 }
 

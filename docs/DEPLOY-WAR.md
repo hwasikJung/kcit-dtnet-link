@@ -1,8 +1,24 @@
 # WAR 배포 가이드 (정적 WAR 방식)
 
 - 산출물: `.output/dtent-link.war` (프로젝트 로컬 생성, git 미포함)
-- 생성 절차: `npm run generate` → `.output/public`(정적 파일) + `WEB-INF/web.xml`을 zip으로 묶어 `.war` 패키징
+- 생성 절차: `pnpm generate` → `.output/public`(정적 파일) + `deploy/WEB-INF/web.xml`(저장소 포함 템플릿)을 zip으로 묶어 `.war` 패키징
 - 생성일 기준 컨텍스트 루트 가정: `/` (ROOT 배포). 하위 경로(`/dtent-link`)로 배포하려면 아래 "컨텍스트 루트 변경" 참고.
+
+## 패키징 절차 (Windows PowerShell)
+
+```powershell
+pnpm generate
+$stage = New-Item -ItemType Directory -Force "$env:TEMP\war-stage"
+Remove-Item "$stage\*" -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item .output\public\* $stage -Recurse
+Copy-Item deploy\WEB-INF $stage -Recurse
+Set-Location $stage
+tar.exe -a -c -f "<프로젝트경로>\.output\dtent-link.zip" @(Get-ChildItem -Name)
+Rename-Item "<프로젝트경로>\.output\dtent-link.zip" "dtent-link.war"
+```
+
+> ⚠️ **반드시 `.zip` 확장자로 생성한 뒤 `.war`로 이름을 변경할 것.** `tar.exe -a`는 확장자로 포맷을 결정하는데, `.war`는 인식하지 못해 **zip이 아닌 tar 형식**으로 만들어 버린다(Tomcat이 풀지 못함). 생성 후 파일 선두 2바이트가 `PK`인지 확인하면 확실하다.
+> `Compress-Archive`도 쓰지 말 것 — zip 엔트리 경로를 백슬래시(`\`)로 기록해 일부 WAS에서 인식하지 못한다.
 
 ## API 호출 방식 — 브라우저 직접 호출 (리버스 프록시 불필요)
 

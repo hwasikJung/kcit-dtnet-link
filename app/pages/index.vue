@@ -127,7 +127,7 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
     <!-- 호출 영역 -->
     <section class="flex flex-col border-b lg:min-h-0 lg:border-b-0 lg:border-r">
       <div class="flex items-center justify-between border-b px-3 py-1.5">
-        <span class="text-xs font-medium text-muted-foreground">API 목록</span>
+        <span class="text-xs font-medium text-muted-foreground">기능 목록</span>
         <Button variant="ghost" size="sm" class="h-7 text-xs" @click="historyOpen = true">
           최근 호출<template v-if="callHistory.items.value.length">
             ({{ callHistory.items.value.length }})</template
@@ -167,14 +167,14 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
         <DialogHeader>
           <DialogTitle>최근 호출</DialogTitle>
           <DialogDescription>
-            이 브라우저에서 최근 호출한 API입니다. 항목을 클릭하면 파라미터가 복원됩니다.
+            이 브라우저에서 최근 호출한 기능입니다. 항목을 클릭하면 파라미터가 복원됩니다.
           </DialogDescription>
         </DialogHeader>
         <p
           v-if="!callHistory.items.value.length"
           class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
         >
-          아직 호출 이력이 없습니다. API를 실행하면 자동으로 기록됩니다.
+          아직 호출 이력이 없습니다. 기능을 실행하면 자동으로 기록됩니다.
         </p>
         <template v-else>
           <div class="flex justify-end">

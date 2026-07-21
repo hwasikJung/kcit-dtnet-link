@@ -45,9 +45,9 @@ const colors = [
       <h2 class="mb-3 text-sm font-semibold">타이포그래피</h2>
       <div class="space-y-2 rounded-lg border p-4">
         <p class="text-xl font-semibold tracking-tight">
-          제목 xl / semibold — 주소 API 테스트 콘솔
+          제목 xl / semibold — 표준연계키 생성 모듈(S/W)
         </p>
-        <p class="text-sm font-medium">본문 sm / medium — API 요청 파라미터를 입력하세요.</p>
+        <p class="text-sm font-medium">본문 sm / medium — 요청 파라미터를 입력하세요.</p>
         <p class="text-sm text-muted-foreground">
           보조 sm / muted — 선택 항목은 비워 둘 수 있습니다.
         </p>
@@ -96,7 +96,7 @@ const colors = [
       <div class="grid gap-2 sm:grid-cols-2">
         <div class="rounded-lg border p-6 text-center text-muted-foreground">
           <p class="text-2xl">🧭</p>
-          <p class="mt-2 text-sm">좌측에서 API를 선택하면 결과가 표시됩니다.</p>
+          <p class="mt-2 text-sm">좌측에서 기능을 선택하면 결과가 표시됩니다.</p>
         </div>
         <div class="rounded-lg border p-6">
           <p class="text-sm text-destructive">요청에 실패했어요. 입력값을 다시 확인해 주세요.</p>

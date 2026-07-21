@@ -2,6 +2,20 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineNuxtConfig({
   compatibilityDate: '2026-07-20',
+  app: {
+    head: {
+      title: '표준연계키 생성 모듈(S/W)',
+      htmlAttrs: { lang: 'ko' },
+      meta: [
+        {
+          name: 'description',
+          content:
+            '표준연계키 생성 모듈(S/W) — 주소 정제·매칭·지오코딩 기능을 웹에서 실행하고 결과를 확인하는 콘솔',
+        },
+      ],
+      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    },
+  },
   devtools: { enabled: false },
   modules: ['@nuxt/eslint', '@pinia/nuxt', 'shadcn-nuxt'],
   css: ['~/assets/css/main.css'],

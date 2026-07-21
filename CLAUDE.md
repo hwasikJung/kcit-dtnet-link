@@ -4,12 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 프로젝트 개요
 
-SQI Soft 주소 정제/매칭/지오코딩 API(`http://220.76.251.227:9930`, Base Path `/sqiapi/addr`)를 **비개발자**가 쉽게 호출·확인할 수 있는 테스트 콘솔. Swagger UI 대체 목적. 메뉴 2개 구성:
+**표준연계키 생성 모듈(S/W)** — SQI Soft 주소 정제/매칭/지오코딩 API(`http://220.76.251.227:9930`, Base Path `/sqiapi/addr`)를 **비개발자**가 쉽게 호출·확인할 수 있는 테스트 콘솔. Swagger UI 대체 목적. 메뉴 2개 구성:
 
-- **메뉴1 `/`** (`app/pages/index.vue`) — API 테스트 콘솔: 태그별 API 목록/검색 → 동적 파라미터 폼 → 실행 → JSON 뷰어 결과. 최근 호출 이력은 `useCallHistory`(localStorage 최근 20건, 응답 본문 미저장)로 기록하고 클릭 시 파라미터 복원
-- **메뉴2 `/bulk`** (`app/pages/bulk.vue`) — 엑셀(A열=`mgmBldPk`) 업로드 → `mgm_bld_pk_info` API 일괄 조회(동시 5건 워커 풀, 최대 5,000행) → 결과 테이블/Modal/xlsx 다운로드/실패 행 재시도 → IndexedDB 이력 저장(최근 20건 초과분 자동 삭제)
+- **메뉴1 `/` 단건 조회** (`app/pages/index.vue`) — 태그별 기능(API) 목록/검색 → 동적 파라미터 폼 → 실행 → JSON 뷰어 결과. 최근 호출 이력은 `useCallHistory`(localStorage 최근 20건, 응답 본문 미저장)로 기록하고 클릭 시 파라미터 복원
+- **메뉴2 `/bulk` 일괄 조회** (`app/pages/bulk.vue`) — 엑셀(A열=`mgmBldPk`) 업로드 → `mgm_bld_pk_info` API 일괄 조회(동시 5건 워커 풀, 최대 5,000행) → 결과 테이블/Modal/xlsx 다운로드/실패 행 재시도 → IndexedDB 이력 저장(최근 20건 초과분 자동 삭제)
 
 스택: Nuxt 4 + Vue 3.5 + shadcn-vue(reka-ui) + Tailwind CSS 4 + Pinia. 인증 없음, 한국어 UI 단일.
+
+**UI 표기 정책:** 사용자에게 보이는 문구에는 "API"를 쓰지 않고 **"기능"**으로 표기한다(예: "기능 목록", "기능 검색"). 개발 문서·코드 식별자(`ApiList.vue`, `apiBase` 등)는 API 유지. 앱 타이틀은 "표준연계키 생성 모듈(S/W)"(헤더·브라우저 탭 공통).
 
 ## 명령어
 

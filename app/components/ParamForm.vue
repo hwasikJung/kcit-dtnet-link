@@ -70,7 +70,7 @@ function onFileChange(ev: Event) {
       <div v-for="p in endpoint.params" :key="p.name">
         <label class="mb-1.5 block text-xs font-medium text-foreground">
           {{ p.name }}
-          <span v-if="p.required" class="text-red-500">*</span>
+          <span v-if="p.required" class="text-red-700">*</span>
           <span v-if="p.description" class="ml-1 font-normal text-muted-foreground">
             — {{ p.description }}
           </span>
@@ -90,7 +90,7 @@ function onFileChange(ev: Event) {
 
       <div v-if="isMultipart">
         <label for="tta-csv-file" class="mb-1.5 block text-xs font-medium">
-          CSV 파일 <span class="text-red-500">*</span>
+          CSV 파일 <span class="text-red-700">*</span>
           <span class="ml-1 font-normal text-muted-foreground">
             — EUC-KR 인코딩, 컬럼: place_code, place_name, input_addr
           </span>

@@ -53,7 +53,11 @@ function keyOf(e: ApiEndpoint) {
 <template>
   <div class="flex h-full flex-col">
     <div class="p-3">
-      <Input v-model="search" aria-label="API 검색" placeholder="API 검색 (예: 정제, 좌표, 건물)" />
+      <Input
+        v-model="search"
+        aria-label="기능 검색"
+        placeholder="기능 검색 (예: 정제, 좌표, 건물)"
+      />
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-3">

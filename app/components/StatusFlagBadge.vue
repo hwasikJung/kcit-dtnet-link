@@ -7,7 +7,7 @@ const label = computed(() => (props.flag === 'modify-planned' ? '수정예정' :
 const cls = computed(() =>
   props.flag === 'modify-planned'
     ? 'bg-secondary text-muted-foreground border-transparent'
-    : 'bg-red-50 text-red-600 border-red-200',
+    : 'bg-red-50 text-red-700 border-red-200',
 )
 </script>
 
@@ -22,7 +22,7 @@ const cls = computed(() =>
           {{ label }}
         </span>
       </TooltipTrigger>
-      <TooltipContent>향후 변경/폐기 예정 API입니다.</TooltipContent>
+      <TooltipContent>향후 변경/폐기 예정 기능입니다.</TooltipContent>
     </Tooltip>
   </TooltipProvider>
 </template>

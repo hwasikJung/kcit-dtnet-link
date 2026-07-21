@@ -1,14 +1,14 @@
-# ROADMAP — API 요청 테스트 사이트 (007_dtent_link)
+# ROADMAP — 표준연계키 생성 모듈(S/W) (007_dtent_link)
 
 - 기준 문서: [PRD.md](PRD.md) v1.2 (Confirmed)
 - 작성일: 2026-07-20
 - 프로젝트 코드: 007_dtent_link
 - 대상 API: SQI Soft Address API (`http://220.76.251.227:9930`, Base Path `/sqiapi/addr`, 26 엔드포인트)
-- 스택: Nuxt 4 + Vue 3.5 + shadcn-vue + Tailwind 4 + Pinia + Nitro server route 프록시 / 엑셀 SheetJS / **PostgreSQL + pg (메뉴2 일괄 조회, 읽기 전용)**
+- 스택: Nuxt 4 + Vue 3.5 + shadcn-vue + Tailwind 4 + Pinia / 엑셀 SheetJS / 브라우저 직접 호출(프록시 없음 — 2026-07-21 Nitro 프록시 제거) / 메뉴2 일괄 조회는 `mgm_bld_pk_info` API 호출 + IndexedDB 이력(2026-07-20 DB 직접 조회에서 변경)
 
 ---
 
-## 진행 현황 (2026-07-20 기준)
+## 진행 현황 (2026-07-21 기준)
 
 ### Phase 0 — 스캐폴딩 & 프록시 PoC ✅ 완료
 - [x] T0.1 Nuxt 4 프로젝트 스캐폴딩 — `npm run dev`/`build` 통과
@@ -46,12 +46,13 @@
 - [x] T3.7 (신규) 조회 이력 로컬 저장 — IndexedDB 자동 저장(최근 20건 유지 — 초과분 삭제 로직 2026-07-21 구현), 이력 목록 클릭 → Modal로 결과·다운로드, 항목 삭제 지원
 - [x] T3.8 (신규) 실패 행 재시도 — 조회 완료 후 실패 행(입력 오류 제외)만 재조회하는 "실패 N건 재시도" 버튼, 동일 이력 id로 갱신 저장 (2026-07-21)
 
-### Phase 4 — 마감·비기능·배포 준비 (진행 중)
-- [ ] T4.1 성능·초기 로드 최적화 — 참고: 정적 빌드 최대 청크 gzip 약 141KB(2026-07-21), 실측 기록 잔여
-- [ ] T4.2 접근성·반응형 통합 점검 — 일부 선반영(2026-07-21): 메뉴2 결과 테이블 행·이력 목록, 메뉴1 최근 호출 목록 키보드 조작(tabindex+Enter/Space+focus ring)
-- [ ] T4.3 배포 구성·프록시/DB 보안 최종화 (`.env.example` 작성됨)
-- [ ] T4.4 문서화(README)·스펙 재추출 절차 — README/CLAUDE.md 작성(2026-07-21), 신규 환경 기동 검증 잔여
+### Phase 4 — 마감·비기능·배포 준비 ✅ 완료 (2026-07-21)
+- [x] T4.1 성능·초기 로드 최적화 — 실측(2026-07-21, 로컬 정적 서버·무스로틀): `/` LCP 694ms · `/bulk` LCP 471ms · CLS 0.00 → 2초 기준 충족. 최대 청크 gzip 약 141KB
+- [x] T4.2 접근성·반응형 통합 점검 — Lighthouse 접근성 `/`·`/bulk` 모두 100점(2026-07-21). 대비 미달 교정: primary를 진한 주황 #b85c00으로 조정해 흰 글자 유지(4.60:1 — 사용자 피드백으로 근흑 글자안 대신 채택), success #15803d·destructive #b91c1c(700 계열), StatusFlagBadge·필수 표시 red-700. `<html lang="ko">`·meta description 추가. 태블릿 820px 두 페이지 레이아웃 정상, 키보드 포커스 순서·focus ring 확인
+- [x] T4.3 배포 구성 최종화 — `deploy/WEB-INF/web.xml` 템플릿 신규 추가(기존 저장소에 부재 → 절차 재현 불가 갭 해소), bsdtar 패키징으로 `.output/dtent-link.war` 생성 재현(zip 시그니처 `PK`·엔트리 슬래시 경로 검증. 주의: `.war` 확장자로 직접 생성하면 tar 형식이 되므로 `.zip` 생성 후 개명 — 실배포에서 발견되어 2026-07-21 절차 수정). `NUXT_PUBLIC_API_BASE` 더미 Origin generate 실험으로 산출물 반영 확인. 스모크는 로컬 정적 서버로 수행(콘솔 오류 0) — **실서버 Tomcat 배포 확인은 배포 시점 항목**
+- [x] T4.4 문서화(README)·스펙 재추출 절차 — 클린 클론 → `pnpm install` → `pnpm generate` 성공(2026-07-21). Windows 깊은 경로(약 240자 초과)에서 install 실패 함정 발견 → README에 주의 추가. `pnpm extract-spec` 재현 확인(26 엔드포인트·9 태그 동일, extractedAt만 변경)
 - [x] T4.5 (신규) 품질 도구 도입 — Vitest(순수 로직 18 테스트: bulk-parse/bulk-columns/extract-spec-lib), ESLint(@nuxt/eslint), Prettier (2026-07-21)
+- [x] T4.6 (신규) 명칭·브랜딩 정비 — 앱 타이틀 "표준연계키 생성 모듈(S/W)"(헤더·브라우저 탭), UI 문구에서 "API" 제거("기능"으로 표기), favicon(`public/favicon.svg`, 열쇠 모티프·포인트 컬러) 추가, README·CLAUDE.md·ROADMAP 명칭 정합 (2026-07-21)
 
 ---
 
@@ -250,9 +251,10 @@
 - 내용: 대비/키보드/포커스/상태 명시(로딩·오류) 전 화면 점검. 데스크톱 우선, 태블릿 대응.
 - **완료 기준:** 메뉴1·2 키보드 완주 가능, 명도 대비 기준 충족, 태블릿 폭 레이아웃 정상.
 
-### T4.3 — 배포 구성 · 프록시/DB 보안 최종화 (**8.2-1**)
-- 내용: Nitro server route 프록시 포함 구성으로 빌드/배포 설정. 대상 Origin 화이트리스트·(추가 시)인증 헤더·**PostgreSQL 접속 정보(읽기 전용 계정)** 를 환경변수로 확정. HTTPS 배포/사내망 어느 환경에서도 동일출처(`/api/*`)만 호출됨을 확인.
-- **완료 기준:** 프로덕션 빌드 산출물로 프록시 경유 호출·DB 조회 정상. 화이트리스트 외 요청 거부 유지. DB 접속 정보가 클라이언트 번들에 노출되지 않음. 환경변수 문서화(README/.env.example).
+### T4.3 — 배포 구성 최종화 (**8.2-1**)
+> **재정의(2026-07-21):** Nitro 프록시 제거(브라우저 직접 호출 전환) 및 메뉴2 DB 직접 조회 폐기로, 원래 내용(프록시 화이트리스트·DB 접속 정보 보안)은 **소멸**. 아래로 대체한다.
+- 내용: `pnpm generate` 산출물 + `WEB-INF/web.xml`을 WAR로 패키징해 WAS(Tomcat 등)에 배포하는 구성 검증(docs/DEPLOY-WAR.md 절차). `NUXT_PUBLIC_API_BASE` 환경변수 재정의가 generate 산출물에 반영되는지 확인. HTTPS 서비스 시 Mixed Content 제약 안내 유지.
+- **완료 기준:** (1) generate 산출물 기준 WAR 패키징 절차 재현 가능. (2) `NUXT_PUBLIC_API_BASE`를 바꿔 generate 하면 산출물에 해당 Origin이 구워짐을 확인. (3) WAS(또는 동등한 정적 서버 컨텍스트)에서 기동 스모크 — 메뉴1·2 페이지 로드 및 실호출 1건.
 
 ### T4.4 — 문서화 · 스펙 재추출 절차
 - 내용: README(실행/빌드/환경변수), 스펙 재추출 스크립트 사용법(8.2-8), 미확정 결정 반영 이력 정리.
