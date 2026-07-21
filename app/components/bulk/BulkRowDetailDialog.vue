@@ -44,7 +44,9 @@ const open = defineModel<boolean>('open', { required: true })
           <table class="w-full text-sm">
             <tbody>
               <tr v-for="c in BULK_COLUMNS" :key="c.key" class="border-b last:border-b-0">
-                <th class="w-36 bg-muted/40 px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                <th
+                  class="w-36 bg-muted/40 px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                >
                   {{ c.label }}
                 </th>
                 <td class="px-3 py-2 break-all">{{ row.cols[c.key] }}</td>

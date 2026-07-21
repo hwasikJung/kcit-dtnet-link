@@ -29,7 +29,10 @@ const colors = [
       <h2 class="mb-3 text-sm font-semibold">컬러 토큰</h2>
       <div class="grid grid-cols-3 gap-2 sm:grid-cols-6">
         <div v-for="c in colors" :key="c.name" class="space-y-1 text-center">
-          <div class="flex h-14 items-center justify-center rounded-lg border text-xs" :class="c.cls">
+          <div
+            class="flex h-14 items-center justify-center rounded-lg border text-xs"
+            :class="c.cls"
+          >
             Aa
           </div>
           <p class="text-[11px] text-muted-foreground">{{ c.name }}</p>
@@ -41,10 +44,16 @@ const colors = [
     <section>
       <h2 class="mb-3 text-sm font-semibold">타이포그래피</h2>
       <div class="space-y-2 rounded-lg border p-4">
-        <p class="text-xl font-semibold tracking-tight">제목 xl / semibold — 주소 API 테스트 콘솔</p>
+        <p class="text-xl font-semibold tracking-tight">
+          제목 xl / semibold — 주소 API 테스트 콘솔
+        </p>
         <p class="text-sm font-medium">본문 sm / medium — API 요청 파라미터를 입력하세요.</p>
-        <p class="text-sm text-muted-foreground">보조 sm / muted — 선택 항목은 비워 둘 수 있습니다.</p>
-        <p class="font-mono text-[11px] text-muted-foreground">mono 11px — /sqiapi/addr/addr_clean</p>
+        <p class="text-sm text-muted-foreground">
+          보조 sm / muted — 선택 항목은 비워 둘 수 있습니다.
+        </p>
+        <p class="font-mono text-[11px] text-muted-foreground">
+          mono 11px — /sqiapi/addr/addr_clean
+        </p>
       </div>
     </section>
 
@@ -72,7 +81,9 @@ const colors = [
         <span
           class="size-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary"
         />
-        <Button variant="outline" size="sm" @click="toast('성공 토스트입니다.')">성공 토스트</Button>
+        <Button variant="outline" size="sm" @click="toast('성공 토스트입니다.')"
+          >성공 토스트</Button
+        >
         <Button variant="outline" size="sm" @click="toast('오류 토스트입니다.', 'error')">
           오류 토스트
         </Button>

@@ -84,7 +84,9 @@ function keyOf(e: ApiEndpoint) {
               </span>
               <span class="flex items-center gap-1.5">
                 <MethodBadge :method="e.method" />
-                <span class="truncate font-mono text-[11px] text-muted-foreground">{{ e.path }}</span>
+                <span class="truncate font-mono text-[11px] text-muted-foreground">{{
+                  e.path
+                }}</span>
               </span>
             </button>
           </AccordionContent>

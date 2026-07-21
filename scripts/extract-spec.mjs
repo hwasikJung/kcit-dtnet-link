@@ -6,46 +6,14 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sliceJsonObject, statusFlagOf, cleanSummary } from './extract-spec-lib.mjs'
 
-const ORIGIN = process.env.NUXT_API_TARGET_ORIGIN ?? 'http://220.76.251.227:9930'
+const ORIGIN = process.env.NUXT_PUBLIC_API_BASE ?? 'http://220.76.251.227:9930'
 const INIT_JS_URL = `${ORIGIN}/api-docs/swagger-ui-init.js`
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_SPEC = resolve(root, 'app/data/api-spec.json')
 const OUT_RAW = resolve(root, 'app/data/swagger-raw.json')
-
-/** 문자열을 인지하는 중괄호 매칭으로 JSON 오브젝트 구간을 잘라낸다 */
-function sliceJsonObject(text, startIdx) {
-  let depth = 0
-  let inStr = false
-  let esc = false
-  for (let i = startIdx; i < text.length; i++) {
-    const c = text[i]
-    if (inStr) {
-      if (esc) esc = false
-      else if (c === '\\') esc = true
-      else if (c === '"') inStr = false
-      continue
-    }
-    if (c === '"') inStr = true
-    else if (c === '{') depth++
-    else if (c === '}') {
-      depth--
-      if (depth === 0) return text.slice(startIdx, i + 1)
-    }
-  }
-  throw new Error('swaggerDoc JSON 구간을 찾지 못했습니다.')
-}
-
-function statusFlagOf(summary = '') {
-  if (summary.includes('(수정예정)')) return 'modify-planned'
-  if (summary.includes('(삭제예정)')) return 'delete-planned'
-  return null
-}
-
-function cleanSummary(summary = '') {
-  return summary.replace(/\((수정예정|삭제예정)\)/g, '').trim()
-}
 
 console.log(`fetch: ${INIT_JS_URL}`)
 const res = await fetch(INIT_JS_URL)
