@@ -3,7 +3,8 @@ import type { BulkHistoryMeta, BulkResultRecord } from '~/types/bulk'
 // 일괄 조회 결과 이력 — 브라우저 IndexedDB 저장 (서버 저장 없음)
 const DB_NAME = 'dtent-link'
 const STORE = 'bulk-results'
-const MAX_ITEMS = 20
+// 이력 1건에 최대 5,000행 + 원본 JSON까지 담기므로 저장소 초과 방지를 위해 최근 N건만 유지
+const HISTORY_LIMIT = 20
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -16,7 +17,10 @@ function openDb(): Promise<IDBDatabase> {
   })
 }
 
-function txRequest<T>(fn: (store: IDBObjectStore) => IDBRequest<T>, mode: IDBTransactionMode): Promise<T> {
+function txRequest<T>(
+  fn: (store: IDBObjectStore) => IDBRequest<T>,
+  mode: IDBTransactionMode,
+): Promise<T> {
   return openDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
@@ -40,12 +44,12 @@ export function useBulkHistory() {
 
   async function save(record: BulkResultRecord) {
     await txRequest((s) => s.put(record), 'readwrite')
-    await refresh()
-    // 오래된 항목 정리 (최근 MAX_ITEMS개 유지)
-    for (const old of items.value.slice(MAX_ITEMS)) {
+    const all = await txRequest<BulkResultRecord[]>((s) => s.getAll(), 'readonly')
+    const excess = all.sort((a, b) => b.createdAt - a.createdAt).slice(HISTORY_LIMIT)
+    for (const old of excess) {
       await txRequest((s) => s.delete(old.id), 'readwrite')
     }
-    if (items.value.length > MAX_ITEMS) await refresh()
+    await refresh()
   }
 
   function get(id: string): Promise<BulkResultRecord | undefined> {

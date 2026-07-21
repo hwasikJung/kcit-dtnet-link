@@ -9,11 +9,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { BULK_COLUMNS, flattenBldInfo } from '~/lib/bulk-columns'
+import { parseBulkSheet } from '~/lib/bulk-parse'
 import type { BulkHistoryMeta, BulkResultRecord, BulkRow } from '~/types/bulk'
 
 const MAX_ROWS = 5000
 const CONCURRENCY = 5
-const PK_PATTERN = /^[\d-]+$/
 
 const { toast } = useToast()
 const history = useBulkHistory()
@@ -34,6 +34,10 @@ const historyOpen = ref(false)
 onMounted(() => history.refresh())
 
 const validCount = computed(() => rows.value.filter((r) => !r.invalid).length)
+// 재시도 대상 = 조회 실패 행 (A열 빈값 등 입력 오류 행은 제외)
+const retryCount = computed(
+  () => rows.value.filter((r) => r.status === 'error' && r.invalid !== 'empty').length,
+)
 const summary = computed(() => ({
   success: rows.value.filter((r) => r.status === 'success').length,
   notfound: rows.value.filter((r) => r.status === 'notfound').length,
@@ -57,32 +61,18 @@ async function onFileChange(ev: Event) {
     return
   }
 
-  // 1행 A열이 PK 형식이 아니면 헤더로 간주하고 건너뜀
-  const firstA = String(aoa[0]?.[0] ?? '').trim()
-  hadHeader.value = aoa.length > 0 && !PK_PATTERN.test(firstA)
-  const dataRows = hadHeader.value ? aoa.slice(1) : aoa
+  const parsed = parseBulkSheet(aoa)
 
-  if (dataRows.length > MAX_ROWS) {
-    toast(`행이 너무 많습니다. 1회 최대 ${MAX_ROWS.toLocaleString()}행까지 처리할 수 있어요.`, 'error')
+  if (parsed.rows.length > MAX_ROWS) {
+    toast(
+      `행이 너무 많습니다. 1회 최대 ${MAX_ROWS.toLocaleString()}행까지 처리할 수 있어요.`,
+      'error',
+    )
     return
   }
 
-  const seen = new Set<string>()
-  rows.value = dataRows.map((r, i) => {
-    const pk = String(r?.[0] ?? '').trim()
-    let invalid: BulkRow['invalid']
-    if (!pk) invalid = 'empty'
-    else if (seen.has(pk)) invalid = 'duplicate'
-    else seen.add(pk)
-    return {
-      seq: i + 1,
-      pk,
-      invalid,
-      status: invalid === 'empty' ? 'error' : 'pending',
-      cols: {},
-      errorMsg: invalid === 'empty' ? 'A열 값이 비어 있습니다.' : undefined,
-    } satisfies BulkRow
-  })
+  hadHeader.value = parsed.hadHeader
+  rows.value = parsed.rows
 
   fileName.value = file.name
   finished.value = false
@@ -91,12 +81,8 @@ async function onFileChange(ev: Event) {
   if (!rows.value.length) toast('엑셀에서 데이터 행을 찾지 못했습니다.', 'error')
 }
 
-async function run() {
-  if (running.value || !rows.value.length) return
+async function executeLookups(pks: string[]) {
   running.value = true
-  finished.value = false
-
-  const pks = [...new Set(rows.value.filter((r) => !r.invalid).map((r) => r.pk))]
   progress.value = { done: 0, total: pks.length }
 
   async function lookup(pk: string) {
@@ -105,7 +91,11 @@ async function run() {
     let raw: unknown = null
     let errorMsg: string | undefined
     try {
-      raw = await $fetch('/api/proxy/sqiapi/addr/mgm_bld_pk_info/' + encodeURIComponent(pk))
+      raw = await $fetch(
+        useRuntimeConfig().public.apiBase +
+          '/sqiapi/addr/mgm_bld_pk_info/' +
+          encodeURIComponent(pk),
+      )
       if (raw && typeof raw === 'object' && 'error' in raw) {
         status = 'notfound'
         errorMsg = '해당 PK로 건물 정보를 찾지 못했습니다.'
@@ -113,9 +103,10 @@ async function run() {
         status = 'success'
         cols = flattenBldInfo(raw)
       }
-    } catch (err: any) {
+    } catch (err) {
       status = 'error'
-      errorMsg = err?.data?.message ?? err?.message ?? '조회 중 오류가 발생했습니다.'
+      const er = err as { data?: { message?: string } | null; message?: string }
+      errorMsg = er?.data?.message ?? er?.message ?? '조회 중 오류가 발생했습니다.'
     }
     for (const row of rows.value) {
       if (row.pk === pk && row.invalid !== 'empty') {
@@ -138,9 +129,14 @@ async function run() {
 
   running.value = false
   finished.value = true
+}
 
+// 마지막 조회의 이력 id — 재시도 시 같은 id로 덮어써 이력이 중복 생성되지 않게 한다
+const lastRecordId = ref('')
+
+async function saveRecord() {
   const record: BulkResultRecord = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: lastRecordId.value,
     fileName: fileName.value,
     createdAt: Date.now(),
     total: rows.value.length,
@@ -155,12 +151,37 @@ async function run() {
   }
 }
 
+async function run() {
+  if (running.value || !rows.value.length) return
+  finished.value = false
+  const pks = [...new Set(rows.value.filter((r) => !r.invalid).map((r) => r.pk))]
+  lastRecordId.value = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await executeLookups(pks)
+  await saveRecord()
+}
+
+async function retryFailed() {
+  if (running.value) return
+  const pks = [
+    ...new Set(
+      rows.value.filter((r) => r.status === 'error' && r.invalid !== 'empty').map((r) => r.pk),
+    ),
+  ]
+  if (!pks.length) return
+  await executeLookups(pks)
+  await saveRecord()
+}
+
 async function download(target: BulkRow[], baseName: string) {
   const XLSX = await import('xlsx')
   const STATUS_LABEL = { pending: '대기', success: '성공', notfound: '미존재', error: '실패' }
   const aoa = [
     ['mgmBldPk', ...BULK_COLUMNS.map((c) => c.label), '상태'],
-    ...target.map((r) => [r.pk, ...BULK_COLUMNS.map((c) => r.cols[c.key] ?? ''), STATUS_LABEL[r.status]]),
+    ...target.map((r) => [
+      r.pk,
+      ...BULK_COLUMNS.map((c) => r.cols[c.key] ?? ''),
+      STATUS_LABEL[r.status],
+    ]),
   ]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '조회결과')
@@ -196,7 +217,7 @@ function formatDate(ts: number) {
 
 <template>
   <main class="mx-auto w-full max-w-screen-2xl px-6 py-8">
-    <h1 class="text-xl font-semibold tracking-tight">엑셀 일괄 조회</h1>
+    <h1 class="text-xl font-semibold tracking-tight">일괄 조회</h1>
     <p class="mt-1 text-sm text-muted-foreground">
       엑셀 A열에 건축물대장 PK(mgmBldPk)를 담아 업로드하면 건물 정보를 일괄 조회해 표로 보여줍니다.
       결과는 이 브라우저의 이력에 저장됩니다.
@@ -231,7 +252,14 @@ function formatDate(ts: number) {
             v-if="running"
             class="mr-2 size-3.5 animate-spin rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground"
           />
-          {{ running ? `조회 중 ${progress.done} / ${progress.total}` : `일괄 조회 실행 (${validCount}건)` }}
+          {{
+            running
+              ? `조회 중 ${progress.done} / ${progress.total}`
+              : `일괄 조회 실행 (${validCount}건)`
+          }}
+        </Button>
+        <Button v-if="finished && retryCount" variant="outline" @click="retryFailed">
+          실패 {{ retryCount }}건 재시도
         </Button>
         <Button v-if="finished" variant="outline" @click="download(rows, fileName)">
           결과 엑셀 다운로드
@@ -239,15 +267,17 @@ function formatDate(ts: number) {
         <span class="text-xs text-muted-foreground">
           총 {{ rows.length }}행<template v-if="hadHeader"> (헤더 1행 제외)</template>
           <template v-if="finished">
-            · <span class="text-success">성공 {{ summary.success }}</span>
-            · 미존재 {{ summary.notfound }}
-            · <span class="text-destructive">실패 {{ summary.error }}</span>
+            · <span class="text-success">성공 {{ summary.success }}</span> · 미존재
+            {{ summary.notfound }} · <span class="text-destructive">실패 {{ summary.error }}</span>
           </template>
         </span>
       </div>
 
       <!-- 진행률 바 -->
-      <div v-if="running && progress.total" class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+      <div
+        v-if="running && progress.total"
+        class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
+      >
         <div
           class="h-full rounded-full bg-primary transition-all"
           :style="{ width: `${Math.round((progress.done / progress.total) * 100)}%` }"
@@ -265,25 +295,41 @@ function formatDate(ts: number) {
 
     <!-- 저장된 이력 -->
     <section class="mt-10">
-      <h2 class="mb-3 text-sm font-medium text-muted-foreground">저장된 조회 이력 (클릭 시 결과 보기)</h2>
-      <p v-if="!history.items.value.length" class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+      <h2 class="mb-3 text-sm font-medium text-muted-foreground">
+        저장된 조회 이력 (클릭 시 결과 보기)
+      </h2>
+      <p
+        v-if="!history.items.value.length"
+        class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
+      >
         저장된 이력이 없습니다. 조회를 실행하면 자동으로 저장됩니다.
       </p>
       <ul v-else class="divide-y rounded-lg border">
         <li
           v-for="item in history.items.value"
           :key="item.id"
-          class="flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-primary/5"
+          tabindex="0"
+          class="flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-primary/5 focus-visible:bg-primary/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
           @click="openHistory(item)"
+          @keydown.enter.prevent="openHistory(item)"
+          @keydown.space.prevent="openHistory(item)"
         >
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">{{ item.fileName }}</p>
-            <p class="mt-0.5 text-xs text-muted-foreground">{{ formatDate(item.createdAt) }} · 총 {{ item.total }}행</p>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ formatDate(item.createdAt) }} · 총 {{ item.total }}행
+            </p>
           </div>
-          <Badge class="border-transparent bg-success text-success-foreground text-[11px]">성공 {{ item.success }}</Badge>
+          <Badge class="border-transparent bg-success text-success-foreground text-[11px]"
+            >성공 {{ item.success }}</Badge
+          >
           <Badge variant="outline" class="text-[11px]">미존재 {{ item.notfound }}</Badge>
-          <Badge class="border-transparent bg-destructive text-white text-[11px]">실패 {{ item.error }}</Badge>
-          <Button variant="ghost" size="sm" class="shrink-0" @click.stop="removeHistory(item)">삭제</Button>
+          <Badge class="border-transparent bg-destructive text-white text-[11px]"
+            >실패 {{ item.error }}</Badge
+          >
+          <Button variant="ghost" size="sm" class="shrink-0" @click.stop="removeHistory(item)"
+            >삭제</Button
+          >
         </li>
       </ul>
     </section>

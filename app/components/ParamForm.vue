@@ -3,11 +3,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { ApiEndpoint } from '~/types/api'
 
-const props = defineProps<{ endpoint: ApiEndpoint; loading: boolean }>()
+const props = defineProps<{
+  endpoint: ApiEndpoint
+  loading: boolean
+  /** 최근 호출 이력 복원용 초기값 (파라미터명 → 값) */
+  initialValues?: Record<string, string | boolean> | null
+}>()
 
 const emit = defineEmits<{ run: [values: Record<string, string | boolean>, file: File | null] }>()
 
-const values = reactive<Record<string, string | boolean>>({})
+const values = ref<Record<string, string | boolean>>({})
 const file = ref<File | null>(null)
 
 const isMultipart = computed(() =>
@@ -17,8 +22,14 @@ const isMultipart = computed(() =>
 watch(
   () => props.endpoint,
   (e) => {
-    for (const k of Object.keys(values)) delete values[k]
-    for (const p of e.params) values[p.name] = p.type === 'boolean' ? false : ''
+    const next: Record<string, string | boolean> = {}
+    for (const p of e.params) next[p.name] = p.type === 'boolean' ? false : ''
+    if (props.initialValues) {
+      for (const [k, v] of Object.entries(props.initialValues)) {
+        if (k in next) next[k] = v
+      }
+    }
+    values.value = next
     file.value = null
   },
   { immediate: true },
@@ -30,7 +41,8 @@ const placeholderOf = (name: string) =>
 const canRun = computed(() => {
   if (props.loading) return false
   for (const p of props.endpoint.params) {
-    if (p.required && p.type !== 'boolean' && !String(values[p.name] ?? '').trim()) return false
+    if (p.required && p.type !== 'boolean' && !String(values.value[p.name] ?? '').trim())
+      return false
   }
   if (isMultipart.value && !file.value) return false
   return true

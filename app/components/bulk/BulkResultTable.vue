@@ -52,8 +52,11 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
           <tr
             v-for="row in paged"
             :key="row.seq"
-            class="cursor-pointer border-b last:border-b-0 transition-colors hover:bg-primary/5"
+            tabindex="0"
+            class="cursor-pointer border-b last:border-b-0 transition-colors hover:bg-primary/5 focus-visible:bg-primary/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             @click="emit('rowClick', row)"
+            @keydown.enter.prevent="emit('rowClick', row)"
+            @keydown.space.prevent="emit('rowClick', row)"
           >
             <td class="px-3 py-2 text-xs text-muted-foreground">{{ row.seq }}</td>
             <td class="px-3 py-2">
@@ -83,7 +86,9 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
     <div v-if="pageCount > 1" class="mt-3 flex items-center justify-end gap-2 text-sm">
       <Button variant="outline" size="sm" :disabled="page <= 1" @click="page--">이전</Button>
       <span class="text-xs text-muted-foreground">{{ page }} / {{ pageCount }}</span>
-      <Button variant="outline" size="sm" :disabled="page >= pageCount" @click="page++">다음</Button>
+      <Button variant="outline" size="sm" :disabled="page >= pageCount" @click="page++"
+        >다음</Button
+      >
     </div>
   </div>
 </template>
