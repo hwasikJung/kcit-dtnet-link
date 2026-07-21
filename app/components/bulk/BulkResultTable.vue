@@ -35,7 +35,9 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
 </script>
 
 <template>
-  <div>
+  <!-- min-w-0: Dialog(grid) 안에서 grid 자식의 min-width:auto가 테이블 내용폭만큼
+       커져 Modal 밖으로 넘치는 것을 막고 overflow-x-auto가 동작하게 함 -->
+  <div class="min-w-0">
     <div class="overflow-x-auto rounded-lg border">
       <table class="w-full min-w-max text-left text-sm">
         <thead>
