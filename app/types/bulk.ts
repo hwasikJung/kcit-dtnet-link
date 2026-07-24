@@ -24,6 +24,8 @@ export interface BulkResultRecord {
   notfound: number
   error: number
   rows: BulkRow[]
+  /** 처리 종류 — 'keygen'=주소→키 일괄 생성, 없으면 기존 대장 정보 조회('info') */
+  kind?: 'info' | 'keygen'
 }
 
 /** 이력 목록 표시용 (rows 제외) */

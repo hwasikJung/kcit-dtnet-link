@@ -8,7 +8,7 @@
 
 ---
 
-## 진행 현황 (2026-07-21 기준)
+## 진행 현황 (2026-07-24 기준)
 
 ### Phase 0 — 스캐폴딩 & 프록시 PoC ✅ 완료
 - [x] T0.1 Nuxt 4 프로젝트 스캐폴딩 — `npm run dev`/`build` 통과
@@ -53,6 +53,19 @@
 - [x] T4.4 문서화(README)·스펙 재추출 절차 — 클린 클론 → `pnpm install` → `pnpm generate` 성공(2026-07-21). Windows 깊은 경로(약 240자 초과)에서 install 실패 함정 발견 → README에 주의 추가. `pnpm extract-spec` 재현 확인(26 엔드포인트·9 태그 동일, extractedAt만 변경)
 - [x] T4.5 (신규) 품질 도구 도입 — Vitest(순수 로직 18 테스트: bulk-parse/bulk-columns/extract-spec-lib), ESLint(@nuxt/eslint), Prettier (2026-07-21)
 - [x] T4.6 (신규) 명칭·브랜딩 정비 — 앱 타이틀 "표준연계키 생성 모듈(S/W)"(헤더·브라우저 탭), UI 문구에서 "API" 제거("기능"으로 표기), favicon(`public/favicon.svg`, 열쇠 모티프·포인트 컬러) 추가, README·CLAUDE.md·ROADMAP 명칭 정합 (2026-07-21)
+
+### Phase 5 — "생성" 중심 UI/UX 전환 ✅ 완료 (2026-07-24, `feature/keygen-home`)
+
+> 과업명("생성 모듈")에 맞춰 첫 화면을 "API 호출 콘솔"에서 "주소 → 표준연계키 생성" 흐름으로 재구성. 기존 콘솔은 전문가용 메뉴로 유지.
+
+- [x] T5.1 키 생성 홈(`/`) 신설 — 주소 입력 → `building_match_clean_union` 호출 → 정제→매칭→생성 3단계 파이프라인 표시 → 키 카드(총괄표제부/표제부 PK·매칭 등급·정제/지번 주소). 응답 파싱은 `app/lib/keygen.ts` 순수 모듈 + Vitest(실서버 응답 픽스처)
+- [x] T5.2 기존 단건 조회 콘솔을 `/tools`(전체 기능)로 이동 — `?path=&<파라미터>=&run=1` 쿼리 프리필+자동 실행 지원(키 카드 연계 진입점). 네비 3메뉴: 키 생성 / 일괄 처리 / 전체 기능
+- [x] T5.3 키 카드 원클릭 연계 — 건축물대장 정보 보기·표제부 PK별 대장 정보·기존 PK로 변환(`convert_mgm_bld_pk_new_to_old`)·전체 기능에서 열기(모두 자동 실행)
+- [x] T5.4 키 일괄 생성 — `/bulk`를 "일괄 처리" 탭 2개(키 일괄 생성: A열=주소 / 대장 정보 일괄 조회: A열=mgmBldPk)로 확장. 워커 풀·재시도·xlsx·IndexedDB 이력(레코드 `kind` 구분) 공유. 파싱·컬럼 매핑은 `app/lib/keygen-bulk.ts` + Vitest
+- [x] T5.5 공유·편의 — 요약 복사(주소+키+등급 텍스트), `?addr=` 공유 링크(진입 시 자동 생성)+링크 복사, 최근 생성 이력(localStorage 10건) 클릭 시 자동 재생성, 표제부 동 이름 온디맨드 조회
+- [x] T5.6 검증 — Vitest 33건(키 파싱·주소 시트 파싱 신규 포함), ESLint 무결, `pnpm generate` 정상, Playwright E2E(키 생성 성공/실패·일괄 생성·이력 재생성·공유 링크·동 이름) 통과
+
+**후속(미착수):** 매칭 등급(M1/CASE) 한글 설명 툴팁(SQI 정의 필요) · 좌표 표시(`legcd_n_coord` 병행) · 에너지 사용량 연계 · 단계별 파이프라인 워크벤치(B안)
 
 ---
 

@@ -10,8 +10,26 @@ import {
 import { BULK_COLUMNS } from '~/lib/bulk-columns'
 import type { BulkRow } from '~/types/bulk'
 
-defineProps<{ row: BulkRow | null }>()
+const props = withDefaults(
+  defineProps<{
+    row: BulkRow | null
+    /** 상세 표의 표시 컬럼 — 기본은 대장 정보 조회 컬럼 */
+    columns?: { key: string; label: string }[]
+    description?: string
+    /** 상태 라벨 재정의 (예: 키 생성에서는 notfound=매칭 실패) */
+    statusLabels?: Partial<Record<BulkRow['status'], string>>
+  }>(),
+  { columns: () => BULK_COLUMNS, description: '건물 정보 상세', statusLabels: () => ({}) },
+)
 const open = defineModel<boolean>('open', { required: true })
+
+const STATUS_LABEL = computed<Record<BulkRow['status'], string>>(() => ({
+  pending: '대기',
+  success: '성공',
+  notfound: '미존재',
+  error: '실패',
+  ...props.statusLabels,
+}))
 </script>
 
 <template>
@@ -31,10 +49,10 @@ const open = defineModel<boolean>('open', { required: true })
             "
             class="text-[11px]"
           >
-            {{ row.status === 'success' ? '성공' : row.status === 'notfound' ? '미존재' : '실패' }}
+            {{ STATUS_LABEL[row.status] }}
           </Badge>
         </DialogTitle>
-        <DialogDescription>건물 정보 상세</DialogDescription>
+        <DialogDescription>{{ description }}</DialogDescription>
       </DialogHeader>
 
       <template v-if="row">
@@ -43,7 +61,7 @@ const open = defineModel<boolean>('open', { required: true })
         <div v-if="row.status === 'success'" class="overflow-hidden rounded-lg border">
           <table class="w-full text-sm">
             <tbody>
-              <tr v-for="c in BULK_COLUMNS" :key="c.key" class="border-b last:border-b-0">
+              <tr v-for="c in columns" :key="c.key" class="border-b last:border-b-0">
                 <th
                   class="w-36 bg-muted/40 px-3 py-2 text-left text-xs font-medium text-muted-foreground"
                 >

@@ -10,13 +10,67 @@ import {
 } from '@/components/ui/dialog'
 import { BULK_COLUMNS, flattenBldInfo } from '~/lib/bulk-columns'
 import { parseBulkSheet } from '~/lib/bulk-parse'
+import { KEYGEN_COLUMNS, flattenKeygenResult, parseAddrSheet } from '~/lib/keygen-bulk'
 import type { BulkHistoryMeta, BulkResultRecord, BulkRow } from '~/types/bulk'
 
 const MAX_ROWS = 5000
 const CONCURRENCY = 5
 
+type BulkMode = 'keygen' | 'info'
+
+/** 탭(처리 종류)별 문구·파서·컬럼 정의 — 흐름(업로드→실행→저장→다운로드)은 공유한다 */
+const MODES: Record<
+  BulkMode,
+  {
+    tab: string
+    desc: string
+    keyLabel: string
+    hint: string
+    runLabel: string
+    columns: { key: string; label: string }[]
+    statusLabels: Partial<Record<BulkRow['status'], string>>
+    detailDesc: string
+    sample: string[][]
+    sampleName: string
+    downloadSuffix: string
+    parse: (aoa: unknown[][]) => { hadHeader: boolean; rows: BulkRow[] }
+  }
+> = {
+  keygen: {
+    tab: '키 일괄 생성',
+    desc: '엑셀 A열에 건물 주소를 담아 업로드하면 주소 정제·건축물대장 매칭을 거쳐 표준연계키를 일괄 생성합니다.',
+    keyLabel: '주소',
+    hint: 'A열 = 건물 주소',
+    runLabel: '일괄 생성',
+    columns: KEYGEN_COLUMNS,
+    statusLabels: { notfound: '매칭 실패' },
+    detailDesc: '표준연계키 생성 상세',
+    sample: [['주소'], ['경기도 고양시 일산서구 고양대로 283'], ['서울특별시 중구 세종대로 110']],
+    sampleName: '키일괄생성_샘플.xlsx',
+    downloadSuffix: '_키생성결과.xlsx',
+    parse: parseAddrSheet,
+  },
+  info: {
+    tab: '대장 정보 일괄 조회',
+    desc: '엑셀 A열에 건축물대장 PK(mgmBldPk)를 담아 업로드하면 건물 정보를 일괄 조회해 표로 보여줍니다.',
+    keyLabel: 'mgmBldPk',
+    hint: 'A열 = mgmBldPk',
+    runLabel: '일괄 조회',
+    columns: BULK_COLUMNS,
+    statusLabels: {},
+    detailDesc: '건물 정보 상세',
+    sample: [['mgmBldPk'], ['11680-12777'], ['11680-12778']],
+    sampleName: '일괄조회_샘플.xlsx',
+    downloadSuffix: '_조회결과.xlsx',
+    parse: parseBulkSheet,
+  },
+}
+
 const { toast } = useToast()
 const history = useBulkHistory()
+
+const mode = ref<BulkMode>('keygen')
+const cfg = computed(() => MODES[mode.value])
 
 const fileName = ref('')
 const rows = ref<BulkRow[]>([])
@@ -26,6 +80,7 @@ const finished = ref(false)
 const progress = ref({ done: 0, total: 0 })
 
 const detailRow = ref<BulkRow | null>(null)
+const detailKind = ref<BulkMode>('keygen')
 const detailOpen = ref(false)
 
 const historyRecord = ref<BulkResultRecord | null>(null)
@@ -33,8 +88,18 @@ const historyOpen = ref(false)
 
 onMounted(() => history.refresh())
 
+function switchMode(next: BulkMode) {
+  if (running.value || mode.value === next) return
+  mode.value = next
+  fileName.value = ''
+  rows.value = []
+  hadHeader.value = false
+  finished.value = false
+  progress.value = { done: 0, total: 0 }
+}
+
 const validCount = computed(() => rows.value.filter((r) => !r.invalid).length)
-// 재시도 대상 = 조회 실패 행 (A열 빈값 등 입력 오류 행은 제외)
+// 재시도 대상 = 처리 실패 행 (A열 빈값 등 입력 오류 행은 제외)
 const retryCount = computed(
   () => rows.value.filter((r) => r.status === 'error' && r.invalid !== 'empty').length,
 )
@@ -44,7 +109,7 @@ const summary = computed(() => ({
   error: rows.value.filter((r) => r.status === 'error').length,
 }))
 
-// 조회 중 새로고침·탭 닫기·페이지 이동으로 진행분이 유실되는 것을 방지
+// 처리 중 새로고침·탭 닫기·페이지 이동으로 진행분이 유실되는 것을 방지
 function onBeforeUnload(e: BeforeUnloadEvent) {
   if (!running.value) return
   e.preventDefault()
@@ -54,15 +119,14 @@ onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 onBeforeRouteLeave(() => {
   if (!running.value) return true
-  return window.confirm('일괄 조회가 진행 중입니다. 페이지를 벗어나면 진행 중인 결과가 사라집니다.')
+  return window.confirm('일괄 처리가 진행 중입니다. 페이지를 벗어나면 진행 중인 결과가 사라집니다.')
 })
 
 async function downloadSample() {
   const XLSX = await import('xlsx')
-  const aoa = [['mgmBldPk'], ['11680-12777'], ['11680-12778']]
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '샘플')
-  XLSX.writeFile(wb, '일괄조회_샘플.xlsx')
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cfg.value.sample), '샘플')
+  XLSX.writeFile(wb, cfg.value.sampleName)
 }
 
 async function onFileChange(ev: Event) {
@@ -82,7 +146,7 @@ async function onFileChange(ev: Event) {
     return
   }
 
-  const parsed = parseBulkSheet(aoa)
+  const parsed = cfg.value.parse(aoa)
 
   if (parsed.rows.length > MAX_ROWS) {
     toast(
@@ -102,49 +166,49 @@ async function onFileChange(ev: Event) {
   if (!rows.value.length) toast('엑셀에서 데이터 행을 찾지 못했습니다.', 'error')
 }
 
-async function executeLookups(pks: string[]) {
-  running.value = true
-  progress.value = { done: 0, total: pks.length }
-
-  async function lookup(pk: string) {
-    let status: BulkRow['status']
-    let cols: Record<string, string> = {}
-    let raw: unknown = null
-    let errorMsg: string | undefined
-    try {
-      raw = await $fetch(
-        useRuntimeConfig().public.apiBase +
-          '/sqiapi/addr/mgm_bld_pk_info/' +
-          encodeURIComponent(pk),
-      )
-      if (raw && typeof raw === 'object' && 'error' in raw) {
-        status = 'notfound'
-        errorMsg = '해당 PK로 건물 정보를 찾지 못했습니다.'
-      } else {
-        status = 'success'
-        cols = flattenBldInfo(raw)
-      }
-    } catch (err) {
-      status = 'error'
-      const er = err as { data?: { message?: string } | null; message?: string }
-      errorMsg = er?.data?.message ?? er?.message ?? '조회 중 오류가 발생했습니다.'
+/** A열 값 1건 처리 — 모드에 따라 대장 정보 조회 또는 키 생성 호출 */
+async function lookupOne(key: string): Promise<Pick<BulkRow, 'status' | 'cols' | 'raw' | 'errorMsg'>> {
+  const apiBase = useRuntimeConfig().public.apiBase
+  try {
+    if (mode.value === 'keygen') {
+      const raw = await $fetch(apiBase + '/sqiapi/addr/building_match_clean_union', {
+        query: { input_addr: key },
+      })
+      return { raw, ...flattenKeygenResult(raw) }
     }
+    const raw = await $fetch(apiBase + '/sqiapi/addr/mgm_bld_pk_info/' + encodeURIComponent(key))
+    if (raw && typeof raw === 'object' && 'error' in raw) {
+      return { raw, status: 'notfound', cols: {}, errorMsg: '해당 PK로 건물 정보를 찾지 못했습니다.' }
+    }
+    return { raw, status: 'success', cols: flattenBldInfo(raw) }
+  } catch (err) {
+    const er = err as { data?: { message?: string } | null; message?: string }
+    return {
+      raw: null,
+      status: 'error',
+      cols: {},
+      errorMsg: er?.data?.message ?? er?.message ?? '처리 중 오류가 발생했습니다.',
+    }
+  }
+}
+
+async function executeLookups(keys: string[]) {
+  running.value = true
+  progress.value = { done: 0, total: keys.length }
+
+  async function lookup(key: string) {
+    const result = await lookupOne(key)
     for (const row of rows.value) {
-      if (row.pk === pk && row.invalid !== 'empty') {
-        row.status = status
-        row.cols = cols
-        row.raw = raw
-        row.errorMsg = errorMsg
-      }
+      if (row.pk === key && row.invalid !== 'empty') Object.assign(row, result)
     }
     progress.value.done++
   }
 
   // 동시 CONCURRENCY건 워커 풀
-  const queue = [...pks]
+  const queue = [...keys]
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-      for (let pk = queue.shift(); pk != null; pk = queue.shift()) await lookup(pk)
+      for (let key = queue.shift(); key != null; key = queue.shift()) await lookup(key)
     }),
   )
 
@@ -152,7 +216,7 @@ async function executeLookups(pks: string[]) {
   finished.value = true
 }
 
-// 마지막 조회의 이력 id — 재시도 시 같은 id로 덮어써 이력이 중복 생성되지 않게 한다
+// 마지막 처리의 이력 id — 재시도 시 같은 id로 덮어써 이력이 중복 생성되지 않게 한다
 const lastRecordId = ref('')
 
 async function saveRecord() {
@@ -163,10 +227,11 @@ async function saveRecord() {
     total: rows.value.length,
     ...summary.value,
     rows: JSON.parse(JSON.stringify(rows.value)),
+    kind: mode.value,
   }
   try {
     await history.save(record)
-    toast('조회 결과를 이력에 저장했습니다.')
+    toast('처리 결과를 이력에 저장했습니다.')
   } catch {
     toast('결과 이력 저장에 실패했습니다. (브라우저 저장소 확인)', 'error')
   }
@@ -175,42 +240,44 @@ async function saveRecord() {
 async function run() {
   if (running.value || !rows.value.length) return
   finished.value = false
-  const pks = [...new Set(rows.value.filter((r) => !r.invalid).map((r) => r.pk))]
+  const keys = [...new Set(rows.value.filter((r) => !r.invalid).map((r) => r.pk))]
   lastRecordId.value = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  await executeLookups(pks)
+  await executeLookups(keys)
   await saveRecord()
 }
 
 async function retryFailed() {
   if (running.value) return
-  const pks = [
+  const keys = [
     ...new Set(
       rows.value.filter((r) => r.status === 'error' && r.invalid !== 'empty').map((r) => r.pk),
     ),
   ]
-  if (!pks.length) return
-  await executeLookups(pks)
+  if (!keys.length) return
+  await executeLookups(keys)
   await saveRecord()
 }
 
-async function download(target: BulkRow[], baseName: string) {
+async function download(target: BulkRow[], baseName: string, kind: BulkMode) {
   const XLSX = await import('xlsx')
-  const STATUS_LABEL = { pending: '대기', success: '성공', notfound: '미존재', error: '실패' }
+  const c = MODES[kind]
+  const statusLabel = { pending: '대기', success: '성공', notfound: '미존재', error: '실패', ...c.statusLabels }
   const aoa = [
-    ['mgmBldPk', ...BULK_COLUMNS.map((c) => c.label), '상태'],
+    [c.keyLabel, ...c.columns.map((col) => col.label), '상태'],
     ...target.map((r) => [
       r.pk,
-      ...BULK_COLUMNS.map((c) => r.cols[c.key] ?? ''),
-      STATUS_LABEL[r.status],
+      ...c.columns.map((col) => r.cols[col.key] ?? ''),
+      statusLabel[r.status],
     ]),
   ]
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '조회결과')
-  XLSX.writeFile(wb, `${baseName.replace(/\.[^.]+$/, '')}_조회결과.xlsx`)
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '결과')
+  XLSX.writeFile(wb, `${baseName.replace(/\.[^.]+$/, '')}${c.downloadSuffix}`)
 }
 
-function openDetail(row: BulkRow) {
+function openDetail(row: BulkRow, kind: BulkMode) {
   detailRow.value = row
+  detailKind.value = kind
   detailOpen.value = true
 }
 
@@ -229,6 +296,9 @@ async function removeHistory(meta: BulkHistoryMeta) {
   toast('이력을 삭제했습니다.')
 }
 
+/** 이력 레코드의 처리 종류 — kind 없는 과거 레코드는 대장 정보 조회 */
+const kindOf = (r: { kind?: BulkMode }) => r.kind ?? 'info'
+
 function formatDate(ts: number) {
   const d = new Date(ts)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -238,14 +308,34 @@ function formatDate(ts: number) {
 
 <template>
   <main class="mx-auto w-full max-w-screen-2xl px-6 py-8">
-    <h1 class="text-xl font-semibold tracking-tight">일괄 조회</h1>
-    <p class="mt-1 text-sm text-muted-foreground">
-      엑셀 A열에 건축물대장 PK(mgmBldPk)를 담아 업로드하면 건물 정보를 일괄 조회해 표로 보여줍니다.
-      결과는 이 브라우저의 이력에 저장됩니다.
+    <h1 class="text-xl font-semibold tracking-tight">일괄 처리</h1>
+
+    <!-- 처리 종류 탭 -->
+    <div class="mt-4 flex gap-1 rounded-lg bg-secondary p-1 sm:w-fit" role="tablist">
+      <button
+        v-for="(m, key) in MODES"
+        :key="key"
+        role="tab"
+        :aria-selected="mode === key"
+        class="flex-1 rounded-md px-4 py-1.5 text-sm transition-colors sm:flex-none"
+        :class="
+          mode === key
+            ? 'bg-card font-medium shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        "
+        :disabled="running"
+        @click="switchMode(key)"
+      >
+        {{ m.tab }}
+      </button>
+    </div>
+
+    <p class="mt-3 text-sm text-muted-foreground">
+      {{ cfg.desc }} 결과는 이 브라우저의 이력에 저장됩니다.
     </p>
 
     <!-- 업로드 -->
-    <section class="mt-6 rounded-lg border p-4">
+    <section class="mt-4 rounded-lg border p-4">
       <div class="flex flex-wrap items-center gap-3">
         <label
           for="bulk-file"
@@ -258,13 +348,13 @@ function formatDate(ts: number) {
           type="file"
           accept=".xlsx,.xls,.csv"
           class="sr-only"
-          aria-label="일괄 조회용 엑셀 파일"
+          aria-label="일괄 처리용 엑셀 파일"
           @change="onFileChange"
         />
         <Button variant="outline" @click="downloadSample">샘플 파일 받기</Button>
         <span v-if="fileName" class="text-sm">{{ fileName }}</span>
         <span class="text-xs text-muted-foreground">
-          A열 = mgmBldPk · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행
+          {{ cfg.hint }} · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행
         </span>
       </div>
 
@@ -276,21 +366,22 @@ function formatDate(ts: number) {
           />
           {{
             running
-              ? `조회 중 ${progress.done} / ${progress.total}`
-              : `일괄 조회 실행 (${validCount}건)`
+              ? `처리 중 ${progress.done} / ${progress.total}`
+              : `${cfg.runLabel} 실행 (${validCount}건)`
           }}
         </Button>
         <Button v-if="finished && retryCount" variant="outline" @click="retryFailed">
           실패 {{ retryCount }}건 재시도
         </Button>
-        <Button v-if="finished" variant="outline" @click="download(rows, fileName)">
+        <Button v-if="finished" variant="outline" @click="download(rows, fileName, mode)">
           결과 엑셀 다운로드
         </Button>
         <span class="text-xs text-muted-foreground">
           총 {{ rows.length }}행<template v-if="hadHeader"> (헤더 1행 제외)</template>
           <template v-if="finished">
-            · <span class="text-success">성공 {{ summary.success }}</span> · 미존재
-            {{ summary.notfound }} · <span class="text-destructive">실패 {{ summary.error }}</span>
+            · <span class="text-success">성공 {{ summary.success }}</span> ·
+            {{ cfg.statusLabels.notfound ?? '미존재' }} {{ summary.notfound }} ·
+            <span class="text-destructive">실패 {{ summary.error }}</span>
           </template>
         </span>
       </div>
@@ -310,21 +401,27 @@ function formatDate(ts: number) {
     <!-- 결과 테이블 -->
     <section v-if="rows.length" class="mt-6">
       <h2 class="mb-3 text-sm font-medium text-muted-foreground">
-        {{ finished ? '조회 결과 (행 클릭 시 상세)' : '업로드된 A열 목록' }}
+        {{ finished ? '처리 결과 (행 클릭 시 상세)' : '업로드된 A열 목록' }}
       </h2>
-      <BulkResultTable :rows="rows" @row-click="openDetail" />
+      <BulkResultTable
+        :rows="rows"
+        :columns="cfg.columns"
+        :key-label="cfg.keyLabel"
+        :status-labels="cfg.statusLabels"
+        @row-click="(row) => openDetail(row, mode)"
+      />
     </section>
 
     <!-- 저장된 이력 -->
     <section class="mt-10">
       <h2 class="mb-3 text-sm font-medium text-muted-foreground">
-        저장된 조회 이력 (클릭 시 결과 보기)
+        저장된 처리 이력 (클릭 시 결과 보기)
       </h2>
       <p
         v-if="!history.items.value.length"
         class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
       >
-        저장된 이력이 없습니다. 조회를 실행하면 자동으로 저장됩니다.
+        저장된 이력이 없습니다. 일괄 처리를 실행하면 자동으로 저장됩니다.
       </p>
       <ul v-else class="divide-y rounded-lg border">
         <li
@@ -337,7 +434,12 @@ function formatDate(ts: number) {
           @keydown.space.prevent="openHistory(item)"
         >
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium">{{ item.fileName }}</p>
+            <p class="flex items-center gap-2 truncate text-sm font-medium">
+              <Badge variant="outline" class="shrink-0 text-[11px]">
+                {{ MODES[kindOf(item)].tab }}
+              </Badge>
+              <span class="truncate">{{ item.fileName }}</span>
+            </p>
             <p class="mt-0.5 text-xs text-muted-foreground">
               {{ formatDate(item.createdAt) }} · 총 {{ item.total }}행
             </p>
@@ -345,7 +447,9 @@ function formatDate(ts: number) {
           <Badge class="border-transparent bg-success text-success-foreground text-[11px]"
             >성공 {{ item.success }}</Badge
           >
-          <Badge variant="outline" class="text-[11px]">미존재 {{ item.notfound }}</Badge>
+          <Badge variant="outline" class="text-[11px]">
+            {{ MODES[kindOf(item)].statusLabels.notfound ?? '미존재' }} {{ item.notfound }}
+          </Badge>
           <Badge class="border-transparent bg-destructive text-white text-[11px]"
             >실패 {{ item.error }}</Badge
           >
@@ -362,9 +466,12 @@ function formatDate(ts: number) {
         <DialogHeader>
           <DialogTitle>{{ historyRecord?.fileName }}</DialogTitle>
           <DialogDescription>
-            {{ historyRecord ? formatDate(historyRecord.createdAt) : '' }} · 총
-            {{ historyRecord?.total }}행 · 성공 {{ historyRecord?.success }} · 미존재
-            {{ historyRecord?.notfound }} · 실패 {{ historyRecord?.error }}
+            <template v-if="historyRecord">
+              {{ MODES[kindOf(historyRecord)].tab }} · {{ formatDate(historyRecord.createdAt) }} ·
+              총 {{ historyRecord.total }}행 · 성공 {{ historyRecord.success }} ·
+              {{ MODES[kindOf(historyRecord)].statusLabels.notfound ?? '미존재' }}
+              {{ historyRecord.notfound }} · 실패 {{ historyRecord.error }}
+            </template>
           </DialogDescription>
         </DialogHeader>
         <div class="flex justify-end">
@@ -372,16 +479,29 @@ function formatDate(ts: number) {
             v-if="historyRecord"
             variant="outline"
             size="sm"
-            @click="download(historyRecord.rows, historyRecord.fileName)"
+            @click="download(historyRecord.rows, historyRecord.fileName, kindOf(historyRecord))"
           >
             결과 엑셀 다운로드
           </Button>
         </div>
-        <BulkResultTable v-if="historyRecord" :rows="historyRecord.rows" @row-click="openDetail" />
+        <BulkResultTable
+          v-if="historyRecord"
+          :rows="historyRecord.rows"
+          :columns="MODES[kindOf(historyRecord)].columns"
+          :key-label="MODES[kindOf(historyRecord)].keyLabel"
+          :status-labels="MODES[kindOf(historyRecord)].statusLabels"
+          @row-click="(row) => openDetail(row, kindOf(historyRecord!))"
+        />
       </DialogScrollContent>
     </Dialog>
 
     <!-- 행 상세 Modal -->
-    <BulkRowDetailDialog v-model:open="detailOpen" :row="detailRow" />
+    <BulkRowDetailDialog
+      v-model:open="detailOpen"
+      :row="detailRow"
+      :columns="MODES[detailKind].columns"
+      :description="MODES[detailKind].detailDesc"
+      :status-labels="MODES[detailKind].statusLabels"
+    />
   </main>
 </template>

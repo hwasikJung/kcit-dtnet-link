@@ -4,7 +4,18 @@ import { Button } from '@/components/ui/button'
 import { BULK_COLUMNS } from '~/lib/bulk-columns'
 import type { BulkRow } from '~/types/bulk'
 
-const props = defineProps<{ rows: BulkRow[] }>()
+const props = withDefaults(
+  defineProps<{
+    rows: BulkRow[]
+    /** B열~ 표시 컬럼 — 기본은 대장 정보 조회 컬럼 */
+    columns?: { key: string; label: string }[]
+    /** A열 헤더 표기 — 기본 mgmBldPk */
+    keyLabel?: string
+    /** 상태 라벨 재정의 (예: 키 생성에서는 notfound=매칭 실패) */
+    statusLabels?: Partial<Record<BulkRow['status'], string>>
+  }>(),
+  { columns: () => BULK_COLUMNS, keyLabel: 'mgmBldPk', statusLabels: () => ({}) },
+)
 const emit = defineEmits<{ rowClick: [row: BulkRow] }>()
 
 const PAGE_SIZE = 100
@@ -19,12 +30,13 @@ watch(
   },
 )
 
-const STATUS_LABEL: Record<BulkRow['status'], string> = {
+const STATUS_LABEL = computed<Record<BulkRow['status'], string>>(() => ({
   pending: '대기',
   success: '성공',
   notfound: '미존재',
   error: '실패',
-}
+  ...props.statusLabels,
+}))
 
 const STATUS_CLASS: Record<BulkRow['status'], string> = {
   pending: 'bg-muted text-muted-foreground border-transparent',
@@ -44,8 +56,8 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
           <tr class="border-b bg-muted/40 text-xs text-muted-foreground">
             <th class="px-3 py-2 font-medium">#</th>
             <th class="px-3 py-2 font-medium">상태</th>
-            <th class="px-3 py-2 font-medium">mgmBldPk</th>
-            <th v-for="c in BULK_COLUMNS" :key="c.key" class="px-3 py-2 font-medium">
+            <th class="px-3 py-2 font-medium">{{ keyLabel }}</th>
+            <th v-for="c in columns" :key="c.key" class="px-3 py-2 font-medium">
               {{ c.label }}
             </th>
           </tr>
@@ -73,7 +85,7 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
             </td>
             <td class="px-3 py-2 font-mono text-xs">{{ row.pk }}</td>
             <td
-              v-for="c in BULK_COLUMNS"
+              v-for="c in columns"
               :key="c.key"
               class="max-w-[280px] truncate px-3 py-2 whitespace-nowrap"
               :title="row.cols[c.key]"

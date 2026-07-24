@@ -12,14 +12,21 @@
             class="whitespace-nowrap rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
             exact-active-class="bg-secondary !text-foreground font-medium"
           >
-            단건 조회
+            키 생성
           </NuxtLink>
           <NuxtLink
             to="/bulk"
             class="whitespace-nowrap rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
             exact-active-class="bg-secondary !text-foreground font-medium"
           >
-            일괄 조회
+            일괄 처리
+          </NuxtLink>
+          <NuxtLink
+            to="/tools"
+            class="whitespace-nowrap rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
+            exact-active-class="bg-secondary !text-foreground font-medium"
+          >
+            전체 기능
           </NuxtLink>
         </nav>
       </div>
