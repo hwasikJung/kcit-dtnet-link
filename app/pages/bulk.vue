@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { BULK_COLUMNS, flattenBldInfo } from '~/lib/bulk-columns'
 import { parseBulkSheet } from '~/lib/bulk-parse'
+import { extractRegionCandidates, type RegionCandidate } from '~/lib/keygen'
 import { KEYGEN_COLUMNS, flattenKeygenResult, parseAddrSheet } from '~/lib/keygen-bulk'
 import type { BulkHistoryMeta, BulkResultRecord, BulkRow } from '~/types/bulk'
 
@@ -167,18 +168,35 @@ async function onFileChange(ev: Event) {
 }
 
 /** A열 값 1건 처리 — 모드에 따라 대장 정보 조회 또는 키 생성 호출 */
-async function lookupOne(key: string): Promise<Pick<BulkRow, 'status' | 'cols' | 'raw' | 'errorMsg'>> {
+async function lookupOne(
+  key: string,
+): Promise<Pick<BulkRow, 'status' | 'cols' | 'raw' | 'errorMsg'>> {
   const apiBase = useRuntimeConfig().public.apiBase
   try {
     if (mode.value === 'keygen') {
-      const raw = await $fetch(apiBase + '/sqiapi/addr/building_match_clean_union', {
-        query: { input_addr: key },
-      })
-      return { raw, ...flattenKeygenResult(raw) }
+      // 다지역 모호 감지용 주소검색을 병렬 호출 — 실패 시 감지만 생략(fail-open)
+      const [raw, regions] = await Promise.all([
+        $fetch(apiBase + '/sqiapi/addr/building_match_clean_union', {
+          query: { input_addr: key },
+        }),
+        $fetch(apiBase + '/sqiapi/addr/asis/juso', {
+          query: { input_addr: key },
+          timeout: 5000,
+        }).then(
+          (d) => extractRegionCandidates(d),
+          () => [] as RegionCandidate[],
+        ),
+      ])
+      return { raw, ...flattenKeygenResult(raw, regions) }
     }
     const raw = await $fetch(apiBase + '/sqiapi/addr/mgm_bld_pk_info/' + encodeURIComponent(key))
     if (raw && typeof raw === 'object' && 'error' in raw) {
-      return { raw, status: 'notfound', cols: {}, errorMsg: '해당 PK로 건물 정보를 찾지 못했습니다.' }
+      return {
+        raw,
+        status: 'notfound',
+        cols: {},
+        errorMsg: '해당 PK로 건물 정보를 찾지 못했습니다.',
+      }
     }
     return { raw, status: 'success', cols: flattenBldInfo(raw) }
   } catch (err) {
@@ -261,7 +279,13 @@ async function retryFailed() {
 async function download(target: BulkRow[], baseName: string, kind: BulkMode) {
   const XLSX = await import('xlsx')
   const c = MODES[kind]
-  const statusLabel = { pending: '대기', success: '성공', notfound: '미존재', error: '실패', ...c.statusLabels }
+  const statusLabel = {
+    pending: '대기',
+    success: '성공',
+    notfound: '미존재',
+    error: '실패',
+    ...c.statusLabels,
+  }
   const aoa = [
     [c.keyLabel, ...c.columns.map((col) => col.label), '상태'],
     ...target.map((r) => [

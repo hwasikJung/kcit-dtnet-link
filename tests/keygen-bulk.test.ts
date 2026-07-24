@@ -69,4 +69,32 @@ describe('flattenKeygenResult', () => {
     expect(r.cols.clean_addr).toBe('없는주소123')
     expect(r.errorMsg).toContain('찾지 못했습니다')
   })
+
+  it('지역 후보가 2곳 이상이면 매칭 성공 응답도 notfound(다지역 모호)로 처리한다', () => {
+    const regions = [
+      { si: '부산광역시', sgg: '중구', roadAddr: '부산광역시 중구 대청로 119', bldNm: '' },
+      { si: '경기도', sgg: '하남시', roadAddr: '경기도 하남시 대청로 119', bldNm: '부영아파트' },
+    ]
+    const r = flattenKeygenResult(
+      { match_mgm_bld_pks: '26110-4901', match_grade: 'M1', clean_addr: '대청로 119' },
+      regions,
+    )
+    expect(r.status).toBe('notfound')
+    expect(r.cols.clean_addr).toBe('대청로 119')
+    expect(r.errorMsg).toContain('2개 지역')
+    expect(r.errorMsg).toContain('부산광역시 중구')
+    expect(r.errorMsg).toContain('경기도 하남시')
+  })
+
+  it('지역 후보가 1곳 이하이면 기존과 동일하게 처리한다', () => {
+    const one = [{ si: '경기도', sgg: '의정부시', roadAddr: '', bldNm: '' }]
+    const r = flattenKeygenResult(
+      { match_mgm_bld_pks: '41150-100288397', match_grade: 'M1', clean_addr: '용민로 10' },
+      one,
+    )
+    expect(r.status).toBe('success')
+    expect(flattenKeygenResult({ match_mgm_bld_pks: '41150-1', clean_addr: 'x' }, []).status).toBe(
+      'success',
+    )
+  })
 })

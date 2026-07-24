@@ -1,10 +1,11 @@
 // 메뉴 '일괄 처리 > 키 일괄 생성' — 주소 시트 파싱과 키 생성 결과의 컬럼 매핑
 // 조회용(bulk-parse/bulk-columns)과 같은 BulkRow 구조를 쓰되, A열 의미가 PK가 아닌 주소다.
 import type { BulkRow } from '~/types/bulk'
-import { parseKeygenResponse } from '~/lib/keygen'
+import { parseKeygenResponse, type RegionCandidate } from '~/lib/keygen'
 
 /** 1행 A열이 주소 표제(주소/도로명주소/address 등)이면 헤더로 간주한다 */
-export const ADDR_HEADER_PATTERN = /^(주소|입력\s*주소|도로명\s*주소|지번\s*주소|addr(ess)?|input_addr)$/i
+export const ADDR_HEADER_PATTERN =
+  /^(주소|입력\s*주소|도로명\s*주소|지번\s*주소|addr(ess)?|input_addr)$/i
 
 /** 시트 AOA(배열의 배열) → 헤더 감지 결과 + 생성 전 상태의 BulkRow 목록 */
 export function parseAddrSheet(aoa: unknown[][]): { hadHeader: boolean; rows: BulkRow[] } {
@@ -41,13 +42,26 @@ export const KEYGEN_COLUMNS: { key: string; label: string }[] = [
   { key: 'grade', label: '매칭 등급' },
 ]
 
-/** building_match_clean_union 응답 → 행 상태 + B열~ 표시 컬럼 값 */
-export function flattenKeygenResult(data: unknown): {
+/** building_match_clean_union 응답 → 행 상태 + B열~ 표시 컬럼 값.
+ * regions(주소검색 후보의 시군구)가 2곳 이상이면 같은 주소가 여러 지역에 있는 것이므로
+ * 매칭 성공 여부와 관계없이 키를 확정하지 않고 매칭 실패로 처리한다(단건 생성의 다지역 감지와 동일 정책) */
+export function flattenKeygenResult(
+  data: unknown,
+  regions?: RegionCandidate[],
+): {
   status: 'success' | 'notfound'
   cols: Record<string, string>
   errorMsg?: string
 } {
   const p = parseKeygenResponse(data)
+  if (regions && regions.length > 1) {
+    const list = regions.map((c) => `${c.si} ${c.sgg}`).join(', ')
+    return {
+      status: 'notfound',
+      cols: { clean_addr: p.ok ? p.result.cleanAddr : p.cleanAddr },
+      errorMsg: `같은 주소가 ${regions.length}개 지역에 있습니다(${list}) — 시·도부터 포함해 다시 입력해 주세요.`,
+    }
+  }
   if (!p.ok) {
     return {
       status: 'notfound',
