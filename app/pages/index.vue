@@ -2,7 +2,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { extractDongNm, parseKeygenResponse, type KeygenParse } from '~/lib/keygen'
+import { extractDongLabel, parseKeygenResponse, type KeygenParse } from '~/lib/keygen'
 
 /** 단건 생성에 사용하는 대표 기능 — 주소정제 후 건축물대장번호 매칭 (3차년도) */
 const MATCH_PATH = '/sqiapi/addr/building_match_clean_union'
@@ -51,8 +51,16 @@ onMounted(() => {
 })
 
 const success = computed(() => (parsed.value?.ok ? parsed.value.result : null))
-/** 대표 키 — 총괄표제부 PK 우선, 없으면 첫 표제부 PK */
-const mainPk = computed(() => success.value?.upperPk || success.value?.pks[0] || '')
+/** 총괄표제부가 없고 표제부가 여러 건이면 대표 키를 정할 수 없다 — 목록에서 선택하게 안내 */
+const noRepresentative = computed(
+  () => !!success.value && !success.value.upperPk && success.value.pks.length > 1,
+)
+/** 대표 키 — 총괄표제부 PK 우선, 없으면 단독 표제부 PK (다건이면 빈 값) */
+const mainPk = computed(() => {
+  const r = success.value
+  if (!r) return ''
+  return r.upperPk || (r.pks.length === 1 ? r.pks[0]! : '')
+})
 const mainPkLabel = computed(() => (success.value?.upperPk ? '총괄표제부 PK' : '표제부 PK'))
 /** 표제부 PK 전체 목록 — 총괄 PK가 있거나 2건 이상일 때만 별도 목록으로 노출 */
 const pkList = computed(() => {
@@ -79,7 +87,7 @@ async function loadDongNames() {
           const raw = await $fetch(
             apiBase + '/sqiapi/addr/mgm_bld_pk_info/' + encodeURIComponent(pk),
           )
-          dongNames.value[pk] = extractDongNm(raw) || '-'
+          dongNames.value[pk] = extractDongLabel(raw) || '-'
         } catch {
           dongNames.value[pk] = '-'
         }
@@ -297,12 +305,21 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             </span>
           </p>
           <div class="mt-2 flex flex-wrap items-center gap-3">
-            <span class="font-mono text-2xl font-semibold break-all sm:text-3xl">{{ mainPk }}</span>
-            <Button variant="outline" size="sm" @click="copy(mainPk)">복사</Button>
+            <span v-if="mainPk" class="font-mono text-2xl font-semibold break-all sm:text-3xl">
+              {{ mainPk }}
+            </span>
+            <span v-else class="text-xl font-semibold">대표 키 없음</span>
+            <Button v-if="mainPk" variant="outline" size="sm" @click="copy(mainPk)">복사</Button>
             <Button variant="outline" size="sm" @click="copySummary()">요약 복사</Button>
             <Button variant="outline" size="sm" @click="copyLink()">링크 복사</Button>
           </div>
-          <p class="mt-1 text-xs text-muted-foreground">{{ mainPkLabel }}</p>
+          <p class="mt-1 text-xs text-muted-foreground">
+            <template v-if="mainPk">{{ mainPkLabel }}</template>
+            <template v-else-if="noRepresentative">
+              총괄표제부가 등재되지 않은 주소입니다 — 아래 표제부
+              {{ success.pks.length }}건에서 건물을 확인해 사용하세요
+            </template>
+          </p>
         </div>
 
         <!-- 표제부 PK 목록 (총괄 PK가 있거나 여러 건일 때) -->
@@ -365,6 +382,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             건축물대장 정보 보기
           </NuxtLink>
           <NuxtLink
+            v-if="mainPk"
             :to="{ path: '/tools', query: { path: CONVERT_PATH, mgm_bld_pk_new: mainPk, run: '1' } }"
             :class="buttonVariants({ variant: 'outline', size: 'sm' })"
           >

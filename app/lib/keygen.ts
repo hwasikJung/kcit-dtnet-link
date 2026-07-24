@@ -29,10 +29,20 @@ export function splitPks(value: unknown): string[] {
     .filter(Boolean)
 }
 
-/** mgm_bld_pk_info 응답에서 동 이름(title_info[0].dong_nm)을 추출 — 없으면 빈 문자열 */
-export function extractDongNm(data: unknown): string {
-  const d = data as { title_info?: { dong_nm?: unknown }[] } | null
-  return String(d?.title_info?.[0]?.dong_nm ?? '').trim()
+/** mgm_bld_pk_info 응답 → PK 보조 표기.
+ * 동 이름 우선, 없으면(오래된 대장 등) "건물명 · 사용승인연도"로 보완. 둘 다 없으면 빈 문자열 */
+export function extractDongLabel(data: unknown): string {
+  const d = data as {
+    basic_info?: { bld_nm?: unknown }
+    title_info?: { dong_nm?: unknown; useapr_day?: unknown }[]
+  } | null
+  const title = d?.title_info?.[0]
+  const dong = String(title?.dong_nm ?? '').trim()
+  if (dong) return dong
+  const bld = String(d?.basic_info?.bld_nm ?? '').trim()
+  const day = String(title?.useapr_day ?? '').trim()
+  const year = /^\d{8}$/.test(day) ? `${day.slice(0, 4)}년` : ''
+  return [bld, year].filter(Boolean).join(' · ')
 }
 
 export function parseKeygenResponse(data: unknown): KeygenParse {

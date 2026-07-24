@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractDongNm, parseKeygenResponse, splitPks } from '~/lib/keygen'
+import { extractDongLabel, parseKeygenResponse, splitPks } from '~/lib/keygen'
 
 // 2026-07-24 실서버(building_match_clean_union) 응답 스냅샷 기반 픽스처
 const SUCCESS_WITH_UPPER = {
@@ -38,16 +38,33 @@ describe('splitPks', () => {
   })
 })
 
-describe('extractDongNm', () => {
-  it('title_info 첫 항목의 동 이름을 추출한다', () => {
-    expect(extractDongNm({ title_info: [{ dong_nm: '도로실험동' }] })).toBe('도로실험동')
+describe('extractDongLabel', () => {
+  it('동 이름이 있으면 동 이름을 우선 사용한다', () => {
+    expect(extractDongLabel({ title_info: [{ dong_nm: '도로실험동' }] })).toBe('도로실험동')
   })
 
-  it('동 이름이 없거나 응답이 비정상이면 빈 문자열을 돌려준다', () => {
-    expect(extractDongNm({ title_info: [{ dong_nm: null }] })).toBe('')
-    expect(extractDongNm({ title_info: [] })).toBe('')
-    expect(extractDongNm({ error: 'Cannot match' })).toBe('')
-    expect(extractDongNm(null)).toBe('')
+  it('동 이름이 없으면 건물명·사용승인연도로 보완한다', () => {
+    expect(
+      extractDongLabel({
+        basic_info: { bld_nm: '서울특별시 청사' },
+        title_info: [{ dong_nm: '신관', useapr_day: '20120831' }],
+      }),
+    ).toBe('신관')
+    expect(
+      extractDongLabel({
+        basic_info: { bld_nm: '서울특별시 청사' },
+        title_info: [{ dong_nm: null, useapr_day: '20120831' }],
+      }),
+    ).toBe('서울특별시 청사 · 2012년')
+    expect(
+      extractDongLabel({ basic_info: { bld_nm: null }, title_info: [{ useapr_day: '19260905' }] }),
+    ).toBe('1926년')
+  })
+
+  it('아무 정보도 없거나 응답이 비정상이면 빈 문자열을 돌려준다', () => {
+    expect(extractDongLabel({ title_info: [] })).toBe('')
+    expect(extractDongLabel({ error: 'Cannot match' })).toBe('')
+    expect(extractDongLabel(null)).toBe('')
   })
 })
 
