@@ -4,7 +4,15 @@
 - 생성 절차: `pnpm generate` → `.output/public`(정적 파일) + `deploy/WEB-INF/web.xml`(저장소 포함 템플릿)을 zip으로 묶어 `.war` 패키징
 - 생성일 기준 컨텍스트 루트 가정: `/` (ROOT 배포). 하위 경로(`/dtent-link`)로 배포하려면 아래 "컨텍스트 루트 변경" 참고.
 
-## 패키징 절차 (Windows PowerShell)
+## 패키징 절차
+
+### 한 번에: `pnpm war` (권장)
+
+```bash
+pnpm war   # = nuxt generate + scripts/make-war.mjs (스테이징·zip·PK 시그니처 검증까지 수행)
+```
+
+### 수동 절차 (Windows PowerShell)
 
 ```powershell
 pnpm generate
