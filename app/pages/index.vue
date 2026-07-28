@@ -369,6 +369,14 @@ async function generate() {
   resultSection.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
 }
 
+// 대장 정보 모달 — 전체 기능 페이지로 이동하지 않고 모달에서 확인(BldInfoDialog)
+const infoOpen = ref(false)
+const infoPk = ref('')
+function openInfo(pk: string) {
+  infoPk.value = pk
+  infoOpen.value = true
+}
+
 // 신규 PK 전환 모달 — 페이지 이동 없이 변환 기능을 직접 호출해 결과를 보여준다
 const convertOpen = ref(false)
 /** 변환 대상(기존) PK */
@@ -564,12 +572,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         </p>
         <div class="mt-2.5 flex flex-wrap gap-2">
           <template v-if="pkKind === 'old'">
-            <NuxtLink
-              :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: addr.trim(), run: '1' } }"
-              :class="buttonVariants({ variant: 'outline', size: 'sm' })"
-            >
+            <Button variant="outline" size="sm" @click="openInfo(addr.trim())">
               건축물대장 정보 보기
-            </NuxtLink>
+            </Button>
             <Button variant="outline" size="sm" @click="openConvert(addr.trim())">
               신규 PK 전환
             </Button>
@@ -661,7 +666,8 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             <Button variant="outline" size="sm" @click="copySummary()">요약 복사</Button>
             <Button variant="outline" size="sm" @click="copyLink()">링크 복사</Button>
           </div>
-          <p class="mt-1 text-xs text-muted-foreground">
+          <!-- 대표 키 라벨(표제부/총괄표제부 PK)은 안내 문구보다 크고 굵게 -->
+          <p class="mt-1 text-muted-foreground" :class="mainPk ? 'text-sm font-bold' : 'text-xs'">
             <template v-if="mainPk">{{ mainPkLabel }}</template>
             <template v-else-if="multiUpper">
               총괄표제부가 {{ upperPks.length }}건 등재된 주소입니다 — 아래에서 총괄별 표제부를
@@ -740,13 +746,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
               <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(g.upperPk)">
                 복사
               </Button>
-              <NuxtLink
-                :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: g.upperPk, run: '1' } }"
-                :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
-                class="h-7 text-xs"
-              >
+              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openInfo(g.upperPk)">
                 대장 정보
-              </NuxtLink>
+              </Button>
               <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openConvert(g.upperPk)">
                 신규 PK 전환
               </Button>
@@ -775,13 +777,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                   <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)">
                     복사
                   </Button>
-                  <NuxtLink
-                    :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: pk, run: '1' } }"
-                    :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
-                    class="h-7 text-xs"
-                  >
+                  <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openInfo(pk)">
                     대장 정보
-                  </NuxtLink>
+                  </Button>
                 </li>
               </ul>
               <!-- 부속건축물 — 주건축물 목록과 구분되도록 배경이 깔린 박스 안에 토글·목록을 묶는다 -->
@@ -821,13 +819,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                     <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)"
                       >복사</Button
                     >
-                    <NuxtLink
-                      :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: pk, run: '1' } }"
-                      :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
-                      class="h-7 text-xs"
-                    >
+                    <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openInfo(pk)">
                       대장 정보
-                    </NuxtLink>
+                    </Button>
                   </li>
                 </ul>
               </div>
@@ -908,13 +902,14 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         </div>
 
         <div class="flex flex-wrap gap-2 border-t px-5 py-3.5">
-          <NuxtLink
+          <Button
             v-if="!pkList.length && mainPk"
-            :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: mainPk, run: '1' } }"
-            :class="buttonVariants({ variant: 'outline', size: 'sm' })"
+            variant="outline"
+            size="sm"
+            @click="openInfo(mainPk)"
           >
             건축물대장 정보 보기
-          </NuxtLink>
+          </Button>
           <Button v-if="mainPk" variant="outline" size="sm" @click="openConvert(mainPk)">
             신규 PK 전환
           </Button>
@@ -1101,5 +1096,8 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         </details>
       </DialogScrollContent>
     </Dialog>
+
+    <!-- 대장 정보 Modal -->
+    <BldInfoDialog v-model:open="infoOpen" :pk="infoPk" />
   </main>
 </template>
