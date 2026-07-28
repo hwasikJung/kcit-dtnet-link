@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **표준연계키 생성 모듈(S/W)** — SQI Soft 주소 정제/매칭/지오코딩 API(`http://220.76.251.227:9930`, Base Path `/sqiapi/addr`)로 주소에서 표준연계키(건축물대장 PK, `mgmBldPk`)를 **비개발자**가 쉽게 생성·확인하는 웹 콘솔. 메뉴 3개 구성:
 
-- **메뉴1 `/` 키 생성** (`app/pages/index.vue`) — 주소 입력 → `building_match_clean_union` 호출 → 정제→매칭→생성 3단계 파이프라인 표시 → 키 카드(총괄표제부/표제부 PK, 복사·요약 복사·링크 복사, 대장 정보·PK 변환 연계). `?addr=<주소>` 진입 시 자동 생성(결과 공유 링크). 최근 생성 이력은 `useKeygenHistory`(localStorage 최근 10건), 클릭 시 자동 재생성. 표제부 동 이름은 온디맨드 버튼으로 건별 조회
-- **메뉴2 `/bulk` 일괄 처리** (`app/pages/bulk.vue`) — 탭 2개. ① 키 일괄 생성: 엑셀 A열=주소 → 키 일괄 생성 ② 대장 정보 일괄 조회: A열=`mgmBldPk` → `mgm_bld_pk_info` 일괄 조회. 두 탭이 워커 풀(동시 5건, 최대 5,000행)·결과 테이블/Modal/xlsx 다운로드/실패 재시도·IndexedDB 이력(레코드 `kind`로 종류 구분, 최근 20건)을 공유
+- **메뉴1 `/` 표준연계키 생성** (`app/pages/index.vue`) — 주소 입력 → `building_match_clean_union` 호출 → 정제→매칭→생성 3단계 파이프라인 표시 → 키 카드(총괄표제부/표제부 PK, 복사·요약 복사·링크 복사, 대장 정보·신규 PK 전환(`convert_mgm_bld_pk_old_to_new`) 연계). `?addr=<주소>` 진입 시 자동 생성(결과 공유 링크). 주소 입력 중에는 `asis/juso` 디바운스 호출로 자동완성 후보 표시(선택 시 즉시 생성, `extractAddrSuggestions`). 최근 생성 이력은 `useKeygenHistory`(localStorage 최근 10건), 클릭 시 자동 재생성. 표제부 동 정보(동명·주/부속·소속 총괄)는 생성 직후 백그라운드 건별 조회, 총괄표제부가 다건이면 총괄별 접이식 그룹으로 표시
+- **메뉴2 `/bulk` 표준연계키 일괄처리** (`app/pages/bulk.vue`) — 탭 2개. ① 주소기반 일괄처리: 엑셀 A열=주소 → 키 일괄 생성 ② PK기반 일괄처리: A열=`mgmBldPk` → `mgm_bld_pk_info` 일괄 조회. 두 탭이 워커 풀(동시 5건, 최대 5,000행)·결과 테이블/Modal/xlsx 다운로드/실패 재시도·IndexedDB 이력(레코드 `kind`로 종류 구분, 최근 20건)을 공유. 업로드 파일의 B열~ 원본 컬럼은 결과 엑셀에 그대로 보존된다(`extraHeaders`/`BulkRow.extra` — 후처리 없이 원본 파일에 결과 컬럼이 붙은 형태)
 - **메뉴3 `/tools` 전체 기능** (`app/pages/tools.vue`) — 태그별 기능(API) 목록/검색 → 동적 파라미터 폼 → 실행 → JSON 뷰어 결과(구 단건 조회 콘솔). `?path=<기능경로>&<파라미터>=<값>&run=1` 쿼리로 진입하면 프리필+자동 실행(키 카드 연계 버튼들이 이 방식 사용). 최근 호출 이력은 `useCallHistory`(localStorage 최근 20건)
 
 스택: Nuxt 4 + Vue 3.5 + shadcn-vue(reka-ui) + Tailwind CSS 4 + Pinia. 인증 없음, 한국어 UI 단일.

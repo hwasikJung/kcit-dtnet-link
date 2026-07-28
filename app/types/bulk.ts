@@ -10,6 +10,8 @@ export interface BulkRow {
   status: BulkRowStatus
   /** B열~ 매핑 컬럼 (key → 표시 값) */
   cols: Record<string, string>
+  /** 업로드 원본 B열~ 셀 값 — 결과 엑셀 다운로드에서 원본 컬럼 보존에 사용 */
+  extra?: string[]
   /** 원본 응답 JSON (상세 Modal 용) */
   raw?: unknown
   errorMsg?: string
@@ -26,6 +28,8 @@ export interface BulkResultRecord {
   rows: BulkRow[]
   /** 처리 종류 — 'keygen'=주소→키 일괄 생성, 없으면 기존 대장 정보 조회('info') */
   kind?: 'info' | 'keygen'
+  /** 업로드 원본 B열~ 헤더 — rows[].extra와 짝. 없는 과거 레코드는 원본 컬럼 없음 */
+  extraHeaders?: string[]
 }
 
 /** 이력 목록 표시용 (rows 제외) */

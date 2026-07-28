@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PK_PATTERN, parseBulkSheet } from '~/lib/bulk-parse'
+import { PK_PATTERN, colLetter, parseBulkSheet } from '~/lib/bulk-parse'
 
 describe('PK_PATTERN', () => {
   it('숫자·하이픈 조합만 PK로 인정한다', () => {
@@ -46,8 +46,45 @@ describe('parseBulkSheet', () => {
   })
 
   it('빈 시트는 빈 결과를 반환한다', () => {
-    const { hadHeader, rows } = parseBulkSheet([])
+    const { hadHeader, extraHeaders, rows } = parseBulkSheet([])
     expect(hadHeader).toBe(false)
+    expect(extraHeaders).toEqual([])
     expect(rows).toHaveLength(0)
+  })
+})
+
+describe('원본 컬럼 보존 (extraHeaders / extra)', () => {
+  it('헤더가 있으면 B열~ 헤더를 그대로 쓰고 행의 원본 셀 값을 보존한다', () => {
+    const { extraHeaders, rows } = parseBulkSheet([
+      ['mgmBldPk', '건물명', '비고'],
+      ['11680-12777', '본관', 123],
+      ['11680-12778'],
+    ])
+    expect(extraHeaders).toEqual(['건물명', '비고'])
+    expect(rows[0]!.extra).toEqual(['본관', '123'])
+    // 짧은 행은 빈 문자열로 채워 열 수를 맞춘다
+    expect(rows[1]!.extra).toEqual(['', ''])
+  })
+
+  it('헤더가 없거나 헤더 셀이 비면 열 문자로 컬럼명을 대체한다', () => {
+    expect(parseBulkSheet([['11680-12777', '메모']]).extraHeaders).toEqual(['B열'])
+    expect(parseBulkSheet([['mgmBldPk', '', 'C컬럼'], ['11680-12777']]).extraHeaders).toEqual([
+      'B열',
+      'C컬럼',
+    ])
+  })
+
+  it('A열만 있는 시트는 extraHeaders가 비고 행의 extra는 생략된다', () => {
+    const { extraHeaders, rows } = parseBulkSheet([['11680-12777']])
+    expect(extraHeaders).toEqual([])
+    expect(rows[0]!.extra).toBeUndefined()
+  })
+
+  it('colLetter는 Z 다음 AA로 이어진다', () => {
+    expect(colLetter(0)).toBe('A')
+    expect(colLetter(1)).toBe('B')
+    expect(colLetter(25)).toBe('Z')
+    expect(colLetter(26)).toBe('AA')
+    expect(colLetter(27)).toBe('AB')
   })
 })

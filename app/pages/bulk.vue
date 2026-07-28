@@ -34,34 +34,41 @@ const MODES: Record<
     sample: string[][]
     sampleName: string
     downloadSuffix: string
-    parse: (aoa: unknown[][]) => { hadHeader: boolean; rows: BulkRow[] }
+    parse: (aoa: unknown[][]) => { hadHeader: boolean; extraHeaders: string[]; rows: BulkRow[] }
   }
 > = {
   keygen: {
-    tab: '키 일괄 생성',
-    desc: '엑셀 A열에 건물 주소를 담아 업로드하면 주소 정제·건축물대장 매칭을 거쳐 표준연계키를 일괄 생성합니다.',
+    tab: '주소기반 일괄처리',
+    desc: '건물 주소로 표준연계키를 만드는 단계입니다. 엑셀 A열에 주소를 담아 업로드하면 주소 정제·건축물대장 매칭을 거쳐 표준연계키를 일괄 생성합니다.',
     keyLabel: '주소',
     hint: 'A열 = 건물 주소',
     runLabel: '일괄 생성',
     columns: KEYGEN_COLUMNS,
     statusLabels: { notfound: '매칭 실패' },
     detailDesc: '표준연계키 생성 상세',
-    sample: [['주소'], ['경기도 고양시 일산서구 고양대로 283'], ['서울특별시 중구 세종대로 110']],
-    sampleName: '키일괄생성_샘플.xlsx',
+    // '대청로 119'는 여러 지역에 있어 일괄 처리에선 항상 실패 처리되므로 시·도까지 붙인 주소를 쓴다
+    sample: [
+      ['주소'],
+      ['부산광역시 중구 대청로 119'],
+      ['홍은동 455'],
+      ['미사대로 510'],
+      ['덕풍남로 11'],
+    ],
+    sampleName: '주소기반일괄생성_샘플.xlsx',
     downloadSuffix: '_키생성결과.xlsx',
     parse: parseAddrSheet,
   },
   info: {
-    tab: '대장 정보 일괄 조회',
-    desc: '엑셀 A열에 건축물대장 PK(mgmBldPk)를 담아 업로드하면 건물 정보를 일괄 조회해 표로 보여줍니다.',
-    keyLabel: 'mgmBldPk',
-    hint: 'A열 = mgmBldPk',
+    tab: 'PK기반 일괄처리',
+    desc: '생성된 표준연계키를 활용하는 단계입니다. 엑셀 A열에 표준연계키(mgmBldPk)를 담아 업로드하면 키에 연결된 건물명·주소·용도·구조·연면적·층수 등 건축물대장 정보를 일괄 조회합니다.',
+    keyLabel: '표준연계키',
+    hint: 'A열 = 표준연계키(mgmBldPk)',
     runLabel: '일괄 조회',
     columns: BULK_COLUMNS,
     statusLabels: {},
-    detailDesc: '건물 정보 상세',
-    sample: [['mgmBldPk'], ['11680-12777'], ['11680-12778']],
-    sampleName: '일괄조회_샘플.xlsx',
+    detailDesc: '표준연계키로 조회한 건물 정보 상세',
+    sample: [['표준연계키'], ['11680-12777'], ['11680-12778']],
+    sampleName: 'PK기반일괄조회_샘플.xlsx',
     downloadSuffix: '_조회결과.xlsx',
     parse: parseBulkSheet,
   },
@@ -76,6 +83,8 @@ const cfg = computed(() => MODES[mode.value])
 const fileName = ref('')
 const rows = ref<BulkRow[]>([])
 const hadHeader = ref(false)
+/** 업로드 원본 B열~ 헤더 — 결과 다운로드에서 원본 컬럼을 그대로 보존한다 */
+const extraHeaders = ref<string[]>([])
 const running = ref(false)
 const finished = ref(false)
 const progress = ref({ done: 0, total: 0 })
@@ -95,6 +104,7 @@ function switchMode(next: BulkMode) {
   fileName.value = ''
   rows.value = []
   hadHeader.value = false
+  extraHeaders.value = []
   finished.value = false
   progress.value = { done: 0, total: 0 }
 }
@@ -120,7 +130,7 @@ onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 onBeforeRouteLeave(() => {
   if (!running.value) return true
-  return window.confirm('일괄 처리가 진행 중입니다. 페이지를 벗어나면 진행 중인 결과가 사라집니다.')
+  return window.confirm('일괄처리가 진행 중입니다. 페이지를 벗어나면 진행 중인 결과가 사라집니다.')
 })
 
 async function downloadSample() {
@@ -158,6 +168,7 @@ async function onFileChange(ev: Event) {
   }
 
   hadHeader.value = parsed.hadHeader
+  extraHeaders.value = parsed.extraHeaders
   rows.value = parsed.rows
 
   fileName.value = file.name
@@ -246,6 +257,7 @@ async function saveRecord() {
     ...summary.value,
     rows: JSON.parse(JSON.stringify(rows.value)),
     kind: mode.value,
+    extraHeaders: [...extraHeaders.value],
   }
   try {
     await history.save(record)
@@ -276,7 +288,7 @@ async function retryFailed() {
   await saveRecord()
 }
 
-async function download(target: BulkRow[], baseName: string, kind: BulkMode) {
+async function download(target: BulkRow[], baseName: string, kind: BulkMode, extras: string[]) {
   const XLSX = await import('xlsx')
   const c = MODES[kind]
   const statusLabel = {
@@ -286,10 +298,12 @@ async function download(target: BulkRow[], baseName: string, kind: BulkMode) {
     error: '실패',
     ...c.statusLabels,
   }
+  // 업로드 원본 컬럼(B열~)을 그대로 두고 결과 컬럼을 뒤에 붙인다 — 받은 파일에서 후처리 없이 사용
   const aoa = [
-    [c.keyLabel, ...c.columns.map((col) => col.label), '상태'],
+    [c.keyLabel, ...extras, ...c.columns.map((col) => col.label), '상태'],
     ...target.map((r) => [
       r.pk,
+      ...extras.map((_, i) => r.extra?.[i] ?? ''),
       ...c.columns.map((col) => r.cols[col.key] ?? ''),
       statusLabel[r.status],
     ]),
@@ -332,7 +346,7 @@ function formatDate(ts: number) {
 
 <template>
   <main class="mx-auto w-full max-w-screen-2xl px-6 py-8">
-    <h1 class="text-xl font-semibold tracking-tight">일괄 처리</h1>
+    <h1 class="text-xl font-semibold tracking-tight">표준연계키 일괄처리</h1>
 
     <!-- 처리 종류 탭 -->
     <div class="mt-4 flex gap-1 rounded-lg bg-secondary p-1 sm:w-fit" role="tablist">
@@ -372,13 +386,14 @@ function formatDate(ts: number) {
           type="file"
           accept=".xlsx,.xls,.csv"
           class="sr-only"
-          aria-label="일괄 처리용 엑셀 파일"
+          aria-label="일괄처리용 엑셀 파일"
           @change="onFileChange"
         />
         <Button variant="outline" @click="downloadSample">샘플 파일 받기</Button>
         <span v-if="fileName" class="text-sm">{{ fileName }}</span>
         <span class="text-xs text-muted-foreground">
-          {{ cfg.hint }} · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행
+          {{ cfg.hint }} · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행 · B열~ 원본
+          열은 결과 엑셀에 보존
         </span>
       </div>
 
@@ -397,7 +412,11 @@ function formatDate(ts: number) {
         <Button v-if="finished && retryCount" variant="outline" @click="retryFailed">
           실패 {{ retryCount }}건 재시도
         </Button>
-        <Button v-if="finished" variant="outline" @click="download(rows, fileName, mode)">
+        <Button
+          v-if="finished"
+          variant="outline"
+          @click="download(rows, fileName, mode, extraHeaders)"
+        >
           결과 엑셀 다운로드
         </Button>
         <span class="text-xs text-muted-foreground">
@@ -445,7 +464,7 @@ function formatDate(ts: number) {
         v-if="!history.items.value.length"
         class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"
       >
-        저장된 이력이 없습니다. 일괄 처리를 실행하면 자동으로 저장됩니다.
+        저장된 이력이 없습니다. 일괄처리를 실행하면 자동으로 저장됩니다.
       </p>
       <ul v-else class="divide-y rounded-lg border">
         <li
@@ -503,7 +522,14 @@ function formatDate(ts: number) {
             v-if="historyRecord"
             variant="outline"
             size="sm"
-            @click="download(historyRecord.rows, historyRecord.fileName, kindOf(historyRecord))"
+            @click="
+              download(
+                historyRecord.rows,
+                historyRecord.fileName,
+                kindOf(historyRecord),
+                historyRecord.extraHeaders ?? [],
+              )
+            "
           >
             결과 엑셀 다운로드
           </Button>

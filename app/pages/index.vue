@@ -3,10 +3,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  extractAddrSuggestions,
   extractDongInfo,
   extractRegionCandidates,
   isRegionListTruncated,
   parseKeygenResponse,
+  splitPks,
+  type AddrSuggestion,
   type DongInfo,
   type KeygenParse,
   type RegionCandidate,
@@ -16,16 +19,14 @@ import {
 const MATCH_PATH = '/sqiapi/addr/building_match_clean_union'
 /** 키 카드에서 건축물대장 정보로 이어지는 기능 */
 const INFO_PATH = '/sqiapi/addr/mgm_bld_pk_info/{mgmbldpk}'
-/** 키 카드에서 신규 PK → 기존 PK 변환으로 이어지는 기능 */
-const CONVERT_PATH = '/sqiapi/addr/convert_mgm_bld_pk_new_to_old'
+/** 키 카드에서 기존 건축물대장 PK → 신규 PK 변환으로 이어지는 기능 */
+const CONVERT_PATH = '/sqiapi/addr/convert_mgm_bld_pk_old_to_new'
 /** 다지역 모호 감지에 사용하는 주소검색 기능(주소기반산업지원서비스) */
 const JUSO_PATH = '/sqiapi/addr/asis/juso'
 
-const SAMPLE_ADDRS = [
-  '경기도 고양시 일산서구 고양대로 283',
-  '서울특별시 중구 세종대로 110',
-  '부산광역시 해운대구 센텀중앙로 79',
-]
+// 지역 접두 없는 짧은 주소 — '대청로 119'는 부산 중구·하남시·보령시 3곳에 존재해 다지역 선택 카드가 뜨고,
+// 나머지 둘은 후보 지역이 1곳뿐이라 바로 키가 생성된다
+const SAMPLE_ADDRS = ['대청로 119', '홍은동 455', '미사대로 510', '덕풍남로 11']
 
 const STEPS = [
   { name: '주소 정제', desc: '표준 주소로 변환' },
@@ -38,6 +39,8 @@ const { toast } = useToast()
 const history = useKeygenHistory()
 
 const addr = ref('')
+/** 마지막 생성에 실제 사용한 주소 — 결과 카드의 연계 링크·요약이 입력창 수정에 흔들리지 않게 고정한다 */
+const lastAddr = ref('')
 const addrInput = ref<{ $el?: HTMLElement } | null>(null)
 const loading = ref(false)
 const stepStates = ref<('idle' | 'running' | 'done' | 'failed')[]>(['idle', 'idle', 'idle'])
@@ -65,15 +68,19 @@ onMounted(() => {
 })
 
 const success = computed(() => (parsed.value?.ok ? parsed.value.result : null))
+/** 총괄표제부 PK 목록 — 서버가 콤마 구분 다건으로 줄 수 있다 */
+const upperPks = computed(() => (success.value ? splitPks(success.value.upperPk) : []))
+/** 총괄표제부가 여러 건 — 대표 키 하나를 정하지 않고 총괄별로 표제부를 묶어 보여준다 */
+const multiUpper = computed(() => upperPks.value.length > 1)
 /** 총괄표제부가 없고 표제부가 여러 건이면 대표 키를 정할 수 없다 — 목록에서 선택하게 안내 */
 const noRepresentative = computed(
   () => !!success.value && !success.value.upperPk && success.value.pks.length > 1,
 )
-/** 대표 키 — 총괄표제부 PK 우선, 없으면 단독 표제부 PK (다건이면 빈 값) */
+/** 대표 키 — 단일 총괄표제부 PK 우선, 없으면 단독 표제부 PK (어느 쪽이든 다건이면 빈 값) */
 const mainPk = computed(() => {
   const r = success.value
-  if (!r) return ''
-  return r.upperPk || (r.pks.length === 1 ? r.pks[0]! : '')
+  if (!r || multiUpper.value) return ''
+  return upperPks.value[0] || (r.pks.length === 1 ? r.pks[0]! : '')
 })
 const mainPkLabel = computed(() => (success.value?.upperPk ? '총괄표제부 PK' : '표제부 PK'))
 /** 표제부 PK 전체 목록 — 총괄 PK가 있거나 2건 이상일 때만 별도 목록으로 노출 */
@@ -83,16 +90,20 @@ const pkList = computed(() => {
   return r.upperPk || r.pks.length > 1 ? r.pks : []
 })
 
-// 표제부 PK별 동 정보(동 이름·주/부속 구분) — 건당 추가 호출이 필요해 생성 완료 직후 백그라운드로 조회한다
+// 표제부 PK별 동 정보(동 이름·주/부속 구분·소속 총괄) — 건당 추가 호출이 필요해 생성 완료 직후 백그라운드로 조회한다
 const dongInfos = ref<Record<string, DongInfo>>({})
 const dongLoading = ref(false)
 const dongLoaded = ref(false)
-const subListOpen = ref(false)
+/** 그룹(총괄)별 부속건축물 목록 펼침 상태 — key는 pkGroups의 key */
+const subOpen = ref<Record<string, boolean>>({})
+/** 총괄 그룹 본문 펼침 상태 — 총괄 다건이면 세로가 길어져 기본 접힘으로 둔다 */
+const groupOpen = ref<Record<string, boolean>>({})
 // 재생성 시 진행 중이던 이전 조회를 무효화하는 실행 토큰
 let dongRunId = 0
 
 async function loadDongInfos() {
-  const pks = pkList.value
+  // 총괄이 여러 건이면 총괄 PK도 함께 조회 — 그룹 헤더의 건물명 표기에 사용
+  const pks = multiUpper.value ? [...upperPks.value, ...pkList.value] : pkList.value
   if (!pks.length) return
   const run = ++dongRunId
   dongLoading.value = true
@@ -110,7 +121,7 @@ async function loadDongInfos() {
           dongInfos.value[pk] = { ...info, label: info.label || '-' }
         } catch {
           if (run !== dongRunId) return
-          dongInfos.value[pk] = { label: '-', isSub: false, purps: '' }
+          dongInfos.value[pk] = { label: '-', isSub: false, purps: '', upperPk: '' }
         }
       }
     }),
@@ -120,13 +131,35 @@ async function loadDongInfos() {
   dongLoaded.value = true
 }
 
-/** 로드 후 주건축물/부속건축물 분리 목록 — 부속이 없으면 그룹핑 없이 전체를 주건축물로 취급 */
-const mainPks = computed(() =>
-  dongLoaded.value ? pkList.value.filter((pk) => !dongInfos.value[pk]?.isSub) : pkList.value,
-)
-const subPks = computed(() =>
-  dongLoaded.value ? pkList.value.filter((pk) => dongInfos.value[pk]?.isSub) : [],
-)
+/** 표제부 표시 그룹 — 총괄이 여러 건이면 총괄별로 묶고, 아니면(또는 소속 로드 전이면) 단일 그룹 */
+interface PkGroup {
+  key: string
+  /** 그룹 헤더로 보여줄 총괄표제부 PK — 단일 그룹이면 빈 문자열 */
+  upperPk: string
+  pks: string[]
+}
+const pkGroups = computed<PkGroup[]>(() => {
+  const uppers = upperPks.value
+  if (uppers.length <= 1) {
+    return pkList.value.length ? [{ key: 'all', upperPk: '', pks: pkList.value }] : []
+  }
+  // 총괄 다건 — 총괄 헤더는 즉시 보여주고, 소속(건별 조회 loadDongInfos)이 로드되기 전에는
+  // 표제부 전체를 미분류(etc) 그룹에 둔다
+  const groups: PkGroup[] = uppers.map((u) => ({ key: u, upperPk: u, pks: [] }))
+  const etc: PkGroup = { key: 'etc', upperPk: '', pks: [] }
+  for (const pk of pkList.value) {
+    const parent = dongLoaded.value ? dongInfos.value[pk]?.upperPk : undefined
+    ;(groups.find((g) => g.upperPk === parent) ?? etc).pks.push(pk)
+  }
+  if (etc.pks.length) groups.push(etc)
+  return groups
+})
+
+/** 그룹 내 주건축물/부속건축물 분리 — 로드 전이면 전체를 주건축물로 취급 */
+const groupMainPks = (g: PkGroup) =>
+  dongLoaded.value ? g.pks.filter((pk) => !dongInfos.value[pk]?.isSub) : g.pks
+const groupSubPks = (g: PkGroup) =>
+  dongLoaded.value ? g.pks.filter((pk) => dongInfos.value[pk]?.isSub) : []
 
 /** PK 옆 보조 표기 — "동 이름 · 주용도" (로드 전이면 빈 문자열) */
 function dongText(pk: string): string {
@@ -140,10 +173,82 @@ function fillSample(v: string) {
   addrInput.value?.$el?.querySelector?.('input')?.focus()
 }
 
+// 주소 자동완성 — 사용자가 타이핑할 때만(@input) 주소검색(asis/juso)을 디바운스 호출해 후보를 띄운다.
+// 프로그램적 입력(예시 채우기·이력 복원·지역 선택)은 input 이벤트가 없어 후보가 뜨지 않는다
+const suggestions = ref<AddrSuggestion[]>([])
+const suggestOpen = ref(false)
+/** 키보드(↑↓)로 강조된 후보 인덱스 — -1이면 없음 */
+const suggestActive = ref(-1)
+let suggestTimer: ReturnType<typeof setTimeout> | undefined
+// 입력이 이어지면 이전 호출 결과를 무시하는 실행 토큰
+let suggestRunId = 0
+
+function closeSuggest() {
+  clearTimeout(suggestTimer)
+  suggestRunId++
+  suggestOpen.value = false
+  suggestActive.value = -1
+}
+
+function onAddrInput(e: Event) {
+  const q = (e.target as HTMLInputElement).value.trim()
+  clearTimeout(suggestTimer)
+  if (q.length < 2) {
+    closeSuggest()
+    return
+  }
+  suggestTimer = setTimeout(async () => {
+    const run = ++suggestRunId
+    try {
+      const data = await $fetch(useRuntimeConfig().public.apiBase + JUSO_PATH, {
+        query: { input_addr: q },
+        timeout: 3000,
+      })
+      if (run !== suggestRunId) return
+      suggestions.value = extractAddrSuggestions(data)
+      suggestActive.value = -1
+      suggestOpen.value = suggestions.value.length > 0
+    } catch {
+      // 자동완성은 부가 기능 — 검색 실패 시 조용히 닫는다
+      if (run === suggestRunId) suggestOpen.value = false
+    }
+  }, 300)
+}
+
+function pickSuggestion(s: AddrSuggestion) {
+  addr.value = s.roadAddr
+  closeSuggest()
+  generate()
+}
+
+/** Enter — 강조된 후보가 있으면 선택, 없으면 입력한 주소로 생성 */
+function onAddrEnter() {
+  const s = suggestOpen.value ? suggestions.value[suggestActive.value] : undefined
+  if (s) pickSuggestion(s)
+  else generate()
+}
+
+function onAddrKeydown(e: KeyboardEvent) {
+  // 한글 IME 조합 중 방향키 오동작 방지
+  if (e.isComposing || !suggestOpen.value || !suggestions.value.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    suggestActive.value = (suggestActive.value + 1) % suggestions.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    suggestActive.value =
+      suggestActive.value <= 0 ? suggestions.value.length - 1 : suggestActive.value - 1
+  } else if (e.key === 'Escape') {
+    suggestOpen.value = false
+  }
+}
+
 async function generate() {
   const address = addr.value.trim()
   if (!address || loading.value) return
 
+  closeSuggest()
+  lastAddr.value = address
   loading.value = true
   started.value = true
   parsed.value = null
@@ -154,7 +259,8 @@ async function generate() {
   dongInfos.value = {}
   dongLoading.value = false
   dongLoaded.value = false
-  subListOpen.value = false
+  subOpen.value = {}
+  groupOpen.value = {}
   regionChoices.value = []
   regionsTruncated.value = false
   router.replace({ query: { addr: address } })
@@ -239,7 +345,7 @@ async function copySummary() {
   if (!r) return
   const lines = [
     '[표준연계키 생성 결과]',
-    `입력 주소: ${addr.value.trim()}`,
+    `입력 주소: ${lastAddr.value}`,
     `정제 주소: ${r.cleanAddr || '-'}`,
     `총괄표제부 PK: ${r.upperPk || '-'}`,
     `표제부 PK (${r.pks.length}건): ${r.pks.join(', ') || '-'}`,
@@ -266,7 +372,7 @@ async function copyLink() {
 
 /** 다지역 후보에서 지역 선택 — 해당 지역 전체 주소로 바로 재생성 */
 function selectRegion(c: RegionCandidate) {
-  addr.value = c.roadAddr || `${c.si} ${c.sgg} ${addr.value.trim()}`
+  addr.value = c.roadAddr || `${c.si} ${c.sgg} ${lastAddr.value}`
   generate()
 }
 
@@ -290,8 +396,10 @@ function formatTime(ts: number) {
 }
 
 function keySummary(item: { upperPk: string; pks: string[] }) {
-  const main = item.upperPk || item.pks[0] || ''
-  const rest = item.pks.length - (item.upperPk ? 0 : 1)
+  // upperPk는 콤마 구분 다건일 수 있어 첫 건만 대표로 쓰고 나머지는 건수로 표기한다
+  const uppers = splitPks(item.upperPk)
+  const main = uppers[0] || item.pks[0] || ''
+  const rest = uppers.length ? uppers.length - 1 + item.pks.length : item.pks.length - 1
   return rest > 0 ? `${main} 외 ${rest}건` : main
 }
 </script>
@@ -309,14 +417,54 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
 
     <section class="rounded-xl border bg-card p-5 shadow-sm" aria-label="표준연계키 생성">
       <div class="flex flex-col gap-2.5 sm:flex-row">
-        <Input
-          ref="addrInput"
-          v-model="addr"
-          class="h-11 flex-1 text-base"
-          placeholder="예: 경기도 고양시 일산서구 고양대로 283"
-          aria-label="건물 주소"
-          @keyup.enter="generate()"
-        />
+        <div class="relative flex-1">
+          <Input
+            ref="addrInput"
+            v-model="addr"
+            class="h-11 w-full text-base"
+            placeholder="예: 대청로 119"
+            aria-label="건물 주소"
+            role="combobox"
+            aria-autocomplete="list"
+            :aria-expanded="suggestOpen"
+            aria-controls="addr-suggest-list"
+            :aria-activedescendant="
+              suggestActive >= 0 ? `addr-suggest-${suggestActive}` : undefined
+            "
+            @input="onAddrInput"
+            @keydown="onAddrKeydown"
+            @keyup.enter="onAddrEnter"
+            @blur="suggestOpen = false"
+          />
+          <!-- 자동완성 후보 — 타이핑 중에만 표시, 선택 즉시 해당 주소로 생성 -->
+          <ul
+            v-if="suggestOpen"
+            id="addr-suggest-list"
+            role="listbox"
+            aria-label="주소 자동완성 후보"
+            class="absolute top-full right-0 left-0 z-20 mt-1 max-h-72 overflow-auto rounded-md border bg-card py-1 shadow-md"
+          >
+            <li
+              v-for="(s, i) in suggestions"
+              :id="`addr-suggest-${i}`"
+              :key="s.roadAddr"
+              role="option"
+              :aria-selected="i === suggestActive"
+            >
+              <button
+                type="button"
+                class="flex w-full flex-wrap items-baseline gap-x-2 px-3 py-2 text-left text-sm transition-colors"
+                :class="i === suggestActive ? 'bg-primary/10' : 'hover:bg-primary/5'"
+                tabindex="-1"
+                @mousedown.prevent
+                @click="pickSuggestion(s)"
+              >
+                <span>{{ s.roadAddr }}</span>
+                <span v-if="s.bldNm" class="text-xs text-muted-foreground">{{ s.bldNm }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
         <Button class="h-11 px-6" :disabled="loading || !addr.trim()" @click="generate()">
           {{ loading ? '생성 중…' : '표준연계키 생성' }}
         </Button>
@@ -382,6 +530,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             <span v-if="mainPk" class="font-mono text-2xl font-semibold break-all sm:text-3xl">
               {{ mainPk }}
             </span>
+            <span v-else-if="multiUpper" class="text-xl font-semibold">
+              총괄표제부 {{ upperPks.length }}건
+            </span>
             <span v-else class="text-xl font-semibold">대표 키 없음</span>
             <Button v-if="mainPk" variant="outline" size="sm" @click="copy(mainPk)">복사</Button>
             <Button variant="outline" size="sm" @click="copySummary()">요약 복사</Button>
@@ -389,6 +540,10 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
           </div>
           <p class="mt-1 text-xs text-muted-foreground">
             <template v-if="mainPk">{{ mainPkLabel }}</template>
+            <template v-else-if="multiUpper">
+              총괄표제부가 {{ upperPks.length }}건 등재된 주소입니다 — 아래에서 총괄별 표제부를
+              확인해 사용하세요
+            </template>
             <template v-else-if="noRepresentative">
               총괄표제부가 등재되지 않은 주소입니다 — 아래 표제부
               {{ success.pks.length }}건에서 건물을 확인해 사용하세요
@@ -397,9 +552,14 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         </div>
 
         <!-- 표제부 PK 목록 (총괄 PK가 있거나 여러 건일 때) — 동 정보 로드 후 주/부속건축물 구분 -->
-        <div v-if="pkList.length" class="border-b px-5 py-3">
+        <div v-if="pkList.length || multiUpper" class="border-b px-5 py-3">
           <div class="flex items-center justify-between">
-            <p class="text-xs font-medium text-muted-foreground">표제부 PK {{ pkList.length }}건</p>
+            <p v-if="pkList.length" class="text-xs font-medium text-muted-foreground">
+              표제부 PK {{ pkList.length }}건
+            </p>
+            <p v-else class="text-xs font-medium text-muted-foreground">
+              총괄표제부 PK {{ upperPks.length }}건
+            </p>
             <span v-if="dongLoading" class="text-xs text-muted-foreground">
               동 정보 불러오는 중…
             </span>
@@ -407,70 +567,154 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
           <p v-if="!dongLoaded" class="mt-0.5 text-xs text-muted-foreground">
             주거동 외 부속건축물(주차장·경비실 등)·상가가 동별로 포함될 수 있습니다
           </p>
-          <p v-if="dongLoaded && subPks.length" class="mt-2 text-xs font-medium">
-            주건축물 {{ mainPks.length }}건
-          </p>
-          <ul class="mt-1.5 divide-y">
-            <li v-for="pk in mainPks" :key="pk" class="flex items-center gap-2 py-1.5">
-              <span class="flex-1 font-mono text-sm break-all">
-                {{ pk }}
-                <span v-if="dongText(pk)" class="ml-1 font-sans text-xs text-muted-foreground">
-                  {{ dongText(pk) }}
+          <!-- 총괄이 여러 건이면 총괄별 그룹, 아니면 단일 그룹(헤더 없음)으로 렌더링 -->
+          <div
+            v-for="g in pkGroups"
+            :key="g.key"
+            :class="g.upperPk || g.key === 'etc' ? 'mt-3 overflow-hidden rounded-lg border' : ''"
+          >
+            <div
+              v-if="g.upperPk"
+              class="flex flex-wrap items-center gap-2 bg-primary/5 px-3 py-2"
+              :class="groupOpen[g.key] ? 'border-b' : ''"
+            >
+              <!-- 헤더 왼쪽 전체가 본문 접기/펼치기 토글 -->
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                :aria-expanded="!!groupOpen[g.key]"
+                @click="groupOpen[g.key] = !groupOpen[g.key]"
+              >
+                <span
+                  aria-hidden="true"
+                  class="inline-block text-xs text-muted-foreground transition-transform"
+                  :class="groupOpen[g.key] ? 'rotate-90' : ''"
+                >
+                  ▶
                 </span>
-              </span>
-              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)">복사</Button>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-[11px] font-medium text-muted-foreground">
+                    총괄표제부 PK
+                  </span>
+                  <span class="block font-mono text-base font-semibold break-all">
+                    {{ g.upperPk }}
+                    <span
+                      v-if="dongText(g.upperPk) && dongText(g.upperPk) !== '-'"
+                      class="ml-1 font-sans text-xs font-normal text-muted-foreground"
+                    >
+                      {{ dongText(g.upperPk) }}
+                    </span>
+                    <span
+                      v-if="dongLoaded"
+                      class="ml-1 font-sans text-xs font-normal text-muted-foreground"
+                    >
+                      표제부 {{ g.pks.length }}건
+                    </span>
+                  </span>
+                </span>
+              </button>
+              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(g.upperPk)">
+                복사
+              </Button>
               <NuxtLink
-                :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: pk, run: '1' } }"
+                :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: g.upperPk, run: '1' } }"
                 :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
                 class="h-7 text-xs"
               >
                 대장 정보
               </NuxtLink>
-            </li>
-          </ul>
-          <!-- 부속건축물 — 주건축물 목록과 구분되도록 배경이 깔린 박스 안에 토글·목록을 묶는다 -->
-          <div v-if="subPks.length" class="mt-2 overflow-hidden rounded-md border bg-muted/40">
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 bg-muted px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/80"
-              :aria-expanded="subListOpen"
-              @click="subListOpen = !subListOpen"
-            >
-              <span
-                aria-hidden="true"
-                class="inline-block text-xs text-muted-foreground transition-transform"
-                :class="subListOpen ? 'rotate-90' : ''"
+              <NuxtLink
+                :to="{
+                  path: '/tools',
+                  query: { path: CONVERT_PATH, mgm_bld_pk: g.upperPk, run: '1' },
+                }"
+                :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
+                class="h-7 text-xs"
               >
-                ▶
-              </span>
-              부속건축물 {{ subPks.length }}건
-              <span class="font-normal text-muted-foreground">
-                (주차장·경비실·주민공동시설 등)
-              </span>
-              <span class="ml-auto text-xs font-normal text-muted-foreground">
-                {{ subListOpen ? '접기' : '펼치기' }}
-              </span>
-            </button>
-            <ul v-if="subListOpen" class="divide-y border-t px-3">
-              <li v-for="pk in subPks" :key="pk" class="flex items-center gap-2 py-1.5">
-                <span class="flex-1 font-mono text-[13px] break-all text-muted-foreground">
-                  {{ pk }}
-                  <span v-if="dongText(pk)" class="ml-1 font-sans text-xs">
-                    {{ dongText(pk) }}
+                신규 PK 전환
+              </NuxtLink>
+            </div>
+            <div
+              v-else-if="g.key === 'etc'"
+              class="border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground"
+            >
+              {{ dongLoaded ? '소속 총괄 미확인' : '소속 총괄 확인 중…' }}
+            </div>
+            <div
+              v-if="!g.upperPk || groupOpen[g.key]"
+              :class="g.upperPk || g.key === 'etc' ? 'px-3 pb-2' : ''"
+            >
+              <p v-if="dongLoaded && groupSubPks(g).length" class="mt-2 text-xs font-medium">
+                주건축물 {{ groupMainPks(g).length }}건
+              </p>
+              <ul class="mt-1.5 divide-y">
+                <li v-for="pk in groupMainPks(g)" :key="pk" class="flex items-center gap-2 py-1.5">
+                  <span class="flex-1 font-mono text-sm break-all">
+                    {{ pk }}
+                    <span v-if="dongText(pk)" class="ml-1 font-sans text-xs text-muted-foreground">
+                      {{ dongText(pk) }}
+                    </span>
                   </span>
-                </span>
-                <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)"
-                  >복사</Button
+                  <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)">
+                    복사
+                  </Button>
+                  <NuxtLink
+                    :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: pk, run: '1' } }"
+                    :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
+                    class="h-7 text-xs"
+                  >
+                    대장 정보
+                  </NuxtLink>
+                </li>
+              </ul>
+              <!-- 부속건축물 — 주건축물 목록과 구분되도록 배경이 깔린 박스 안에 토글·목록을 묶는다 -->
+              <div
+                v-if="groupSubPks(g).length"
+                class="mt-2 mb-2 overflow-hidden rounded-md border bg-muted/40"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 bg-muted px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/80"
+                  :aria-expanded="!!subOpen[g.key]"
+                  @click="subOpen[g.key] = !subOpen[g.key]"
                 >
-                <NuxtLink
-                  :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: pk, run: '1' } }"
-                  :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
-                  class="h-7 text-xs"
-                >
-                  대장 정보
-                </NuxtLink>
-              </li>
-            </ul>
+                  <span
+                    aria-hidden="true"
+                    class="inline-block text-xs text-muted-foreground transition-transform"
+                    :class="subOpen[g.key] ? 'rotate-90' : ''"
+                  >
+                    ▶
+                  </span>
+                  부속건축물 {{ groupSubPks(g).length }}건
+                  <span class="font-normal text-muted-foreground">
+                    (주차장·경비실·주민공동시설 등)
+                  </span>
+                  <span class="ml-auto text-xs font-normal text-muted-foreground">
+                    {{ subOpen[g.key] ? '접기' : '펼치기' }}
+                  </span>
+                </button>
+                <ul v-if="subOpen[g.key]" class="divide-y border-t px-3">
+                  <li v-for="pk in groupSubPks(g)" :key="pk" class="flex items-center gap-2 py-1.5">
+                    <span class="flex-1 font-mono text-[13px] break-all text-muted-foreground">
+                      {{ pk }}
+                      <span v-if="dongText(pk)" class="ml-1 font-sans text-xs">
+                        {{ dongText(pk) }}
+                      </span>
+                    </span>
+                    <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)"
+                      >복사</Button
+                    >
+                    <NuxtLink
+                      :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: pk, run: '1' } }"
+                      :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
+                      class="h-7 text-xs"
+                    >
+                      대장 정보
+                    </NuxtLink>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -502,14 +746,14 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             v-if="mainPk"
             :to="{
               path: '/tools',
-              query: { path: CONVERT_PATH, mgm_bld_pk_new: mainPk, run: '1' },
+              query: { path: CONVERT_PATH, mgm_bld_pk: mainPk, run: '1' },
             }"
             :class="buttonVariants({ variant: 'outline', size: 'sm' })"
           >
-            기존 PK로 변환
+            신규 PK 전환
           </NuxtLink>
           <NuxtLink
-            :to="{ path: '/tools', query: { path: MATCH_PATH, input_addr: addr, run: '1' } }"
+            :to="{ path: '/tools', query: { path: MATCH_PATH, input_addr: lastAddr, run: '1' } }"
             :class="buttonVariants({ variant: 'outline', size: 'sm' })"
           >
             전체 기능에서 열기
@@ -592,7 +836,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         </ul>
         <div class="mt-4">
           <NuxtLink
-            :to="{ path: '/tools', query: { path: MATCH_PATH, input_addr: addr } }"
+            :to="{ path: '/tools', query: { path: MATCH_PATH, input_addr: lastAddr } }"
             :class="buttonVariants({ variant: 'outline', size: 'sm' })"
           >
             전체 기능에서 다른 방식으로 시도

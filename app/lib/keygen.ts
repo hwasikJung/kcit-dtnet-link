@@ -52,12 +52,15 @@ export interface DongInfo {
   isSub: boolean
   /** 주용도명 (예: 공동주택) */
   purps: string
+  /** 소속 총괄표제부 PK — 없으면 빈 문자열. 총괄이 여러 건일 때 표제부 그룹핑에 사용한다 */
+  upperPk: string
 }
 
-/** mgm_bld_pk_info 응답 → 동 표기 + 주/부속 구분.
+/** mgm_bld_pk_info 응답 → 동 표기 + 주/부속 구분 + 소속 총괄 PK.
  * 표제부에는 주거동 외 부속건축물(주차장·경비실 등)도 동별로 포함되어 목록 구분에 사용한다 */
 export function extractDongInfo(data: unknown): DongInfo {
   const d = data as {
+    basic_info?: { mgm_upper_bld_pk?: unknown }
     title_info?: { main_atch_gb_nm?: unknown; main_purps_nm?: unknown }[]
   } | null
   const title = d?.title_info?.[0]
@@ -65,6 +68,7 @@ export function extractDongInfo(data: unknown): DongInfo {
     label: extractDongLabel(data),
     isSub: String(title?.main_atch_gb_nm ?? '').trim() === '부속건축물',
     purps: String(title?.main_purps_nm ?? '').trim(),
+    upperPk: String(d?.basic_info?.mgm_upper_bld_pk ?? '').trim(),
   }
 }
 
@@ -84,6 +88,8 @@ interface JusoItem {
   sggNm?: unknown
   roadAddrPart1?: unknown
   bdNm?: unknown
+  /** 지번주소 전체 (예: 부산광역시 중구 대청동4가 81) */
+  jibunAddr?: unknown
   /** 도로명 (예: 대청로) */
   rn?: unknown
   /** 건물본번 (예: 119) */
@@ -137,6 +143,34 @@ export function extractRegionCandidates(data: unknown): RegionCandidate[] {
     }
   }
   return [...seen.values()]
+}
+
+export interface AddrSuggestion {
+  /** 전체 도로명주소 — 선택 시 생성 입력으로 사용 */
+  roadAddr: string
+  /** 건물명 — 없으면 빈 문자열 */
+  bldNm: string
+  /** 지번주소 — 없으면 빈 문자열 */
+  jibunAddr: string
+}
+
+/** asis/juso 응답 → 입력 자동완성 후보(도로명주소 기준 중복 제거, 입력 순서 유지, 최대 limit건).
+ * 서버가 유사 검색 결과를 그대로 주므로 필터 없이 사용자 선택에 맡긴다 */
+export function extractAddrSuggestions(data: unknown, limit = 8): AddrSuggestion[] {
+  const d = data as { results?: { juso?: unknown } } | null
+  const list = d?.results?.juso
+  if (!Array.isArray(list)) return []
+  const out: AddrSuggestion[] = []
+  const seen = new Set<string>()
+  for (const item of list) {
+    const j = item as JusoItem | null
+    const roadAddr = str(j?.roadAddrPart1)
+    if (!roadAddr || seen.has(roadAddr)) continue
+    seen.add(roadAddr)
+    out.push({ roadAddr, bldNm: str(j?.bdNm), jibunAddr: str(j?.jibunAddr) })
+    if (out.length >= limit) break
+  }
+  return out
 }
 
 /** asis/juso 응답이 전체 후보 중 일부만 담고 있는지 — 서버가 페이지 크기 10 고정으로 1페이지만 반환한다.

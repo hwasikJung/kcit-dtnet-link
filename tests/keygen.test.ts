@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  extractAddrSuggestions,
   extractDongInfo,
   extractDongLabel,
   extractRegionCandidates,
@@ -84,7 +85,7 @@ describe('extractDongInfo', () => {
           { dong_nm: '1117동', main_purps_nm: '공동주택', main_atch_gb_nm: '부속건축물' },
         ],
       }),
-    ).toEqual({ label: '1117동', isSub: true, purps: '공동주택' })
+    ).toEqual({ label: '1117동', isSub: true, purps: '공동주택', upperPk: '' })
   })
 
   it('주건축물 표제부는 isSub=false로 구분한다', () => {
@@ -92,7 +93,19 @@ describe('extractDongInfo', () => {
       extractDongInfo({
         title_info: [{ dong_nm: '1112동', main_purps_nm: '공동주택', main_atch_gb_nm: '주건축물' }],
       }),
-    ).toEqual({ label: '1112동', isSub: false, purps: '공동주택' })
+    ).toEqual({ label: '1112동', isSub: false, purps: '공동주택', upperPk: '' })
+  })
+
+  it('소속 총괄표제부 PK를 basic_info에서 추출한다', () => {
+    // 2026-07-27 실서버(mgm_bld_pk_info 11410-22316) 응답 스냅샷 기반 — 홍은동 455 총괄 2건 케이스
+    expect(
+      extractDongInfo({
+        basic_info: { mgm_upper_bld_pk: '11410-261' },
+        title_info: [{ dong_nm: '117동', main_purps_nm: '공동주택', main_atch_gb_nm: '주건축물' }],
+      }),
+    ).toEqual({ label: '117동', isSub: false, purps: '공동주택', upperPk: '11410-261' })
+    // 총괄표제부 자신의 응답은 mgm_upper_bld_pk가 null — 빈 문자열로 정규화
+    expect(extractDongInfo({ basic_info: { mgm_upper_bld_pk: null } }).upperPk).toBe('')
   })
 
   it('주부속구분이 없으면 주건축물로 간주한다', () => {
@@ -100,17 +113,24 @@ describe('extractDongInfo', () => {
       label: '본관',
       isSub: false,
       purps: '',
+      upperPk: '',
     })
   })
 
   it('응답이 비정상이면 주건축물로 간주하고 빈 값을 돌려준다', () => {
-    expect(extractDongInfo({ title_info: [] })).toEqual({ label: '', isSub: false, purps: '' })
+    expect(extractDongInfo({ title_info: [] })).toEqual({
+      label: '',
+      isSub: false,
+      purps: '',
+      upperPk: '',
+    })
     expect(extractDongInfo({ error: 'Cannot match' })).toEqual({
       label: '',
       isSub: false,
       purps: '',
+      upperPk: '',
     })
-    expect(extractDongInfo(null)).toEqual({ label: '', isSub: false, purps: '' })
+    expect(extractDongInfo(null)).toEqual({ label: '', isSub: false, purps: '', upperPk: '' })
   })
 })
 
@@ -254,6 +274,50 @@ describe('extractRegionCandidates', () => {
     expect(extractRegionCandidates({ results: {} })).toEqual([])
     expect(extractRegionCandidates(null)).toEqual([])
     expect(extractRegionCandidates('oops')).toEqual([])
+  })
+})
+
+describe('extractAddrSuggestions', () => {
+  const JUSO = {
+    results: {
+      juso: [
+        {
+          roadAddrPart1: '부산광역시 중구 대청로 119',
+          bdNm: '',
+          jibunAddr: '부산광역시 중구 대청동4가 81',
+        },
+        { roadAddrPart1: '경기도 하남시 대청로 119', bdNm: '부영아파트', jibunAddr: '' },
+        // 같은 도로명주소가 상세(층·호)만 다르게 반복되는 경우 — 중복 제거 대상
+        { roadAddrPart1: '부산광역시 중구 대청로 119', bdNm: '' },
+        // 도로명주소가 없는 항목 — 제외 대상
+        { roadAddrPart1: '' },
+      ],
+    },
+  }
+
+  it('도로명주소 기준으로 중복을 제거하고 입력 순서를 유지한다', () => {
+    const r = extractAddrSuggestions(JUSO)
+    expect(r).toHaveLength(2)
+    expect(r[0]).toEqual({
+      roadAddr: '부산광역시 중구 대청로 119',
+      bldNm: '',
+      jibunAddr: '부산광역시 중구 대청동4가 81',
+    })
+    expect(r[1]!.bldNm).toBe('부영아파트')
+  })
+
+  it('limit 건수까지만 돌려준다 (기본 8건)', () => {
+    const many = {
+      results: { juso: Array.from({ length: 10 }, (_, i) => ({ roadAddrPart1: `주소 ${i}` })) },
+    }
+    expect(extractAddrSuggestions(many, 3)).toHaveLength(3)
+    expect(extractAddrSuggestions(many)).toHaveLength(8)
+  })
+
+  it('응답이 비정상이면 빈 목록을 돌려준다', () => {
+    expect(extractAddrSuggestions({ results: {} })).toEqual([])
+    expect(extractAddrSuggestions(null)).toEqual([])
+    expect(extractAddrSuggestions('oops')).toEqual([])
   })
 })
 

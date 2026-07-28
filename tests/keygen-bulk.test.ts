@@ -34,6 +34,15 @@ describe('parseAddrSheet', () => {
     expect(rows).toHaveLength(2)
   })
 
+  it('B열~ 원본 컬럼 헤더와 셀 값을 보존한다', () => {
+    const { extraHeaders, rows } = parseAddrSheet([
+      ['주소', '관리번호'],
+      ['서울특별시 중구 세종대로 110', 'A-1'],
+    ])
+    expect(extraHeaders).toEqual(['관리번호'])
+    expect(rows[0]!.extra).toEqual(['A-1'])
+  })
+
   it('빈값 행은 invalid=empty + status=error, 중복 주소는 invalid=duplicate로 표시한다', () => {
     const { rows } = parseAddrSheet([
       ['서울특별시 중구 세종대로 110'],
