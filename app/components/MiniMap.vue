@@ -56,7 +56,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative h-60 overflow-hidden rounded-lg border">
+  <!-- isolate: Leaflet 내부 z-index(컨트롤 1000 등)가 카드 밖(모달 오버레이 z-50)을 뚫지 않게 격리 -->
+  <div class="relative isolate z-0 h-60 overflow-hidden rounded-lg border">
     <div ref="el" class="h-full w-full" />
     <div
       v-if="failed"
