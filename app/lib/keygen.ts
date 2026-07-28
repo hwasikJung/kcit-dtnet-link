@@ -72,6 +72,27 @@ export function extractDongInfo(data: unknown): DongInfo {
   }
 }
 
+export interface ConvertResult {
+  /** 변환된 신규 PK — 실패면 빈 문자열 */
+  newPk: string
+  /** 실패 안내 메시지 — 성공이면 빈 문자열 */
+  error: string
+}
+
+/** convert_mgm_bld_pk_old_to_new 응답 → 신규 PK.
+ * 성공도 미존재도 HTTP 200 — 성공: {"mgm_bld_pk_new":"1024112777"}, 미존재: {"mgm_bld_pk_new":null} */
+export function parseConvertResponse(data: unknown): ConvertResult {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return { newPk: '', error: '응답 형식을 해석할 수 없습니다.' }
+  }
+  const d = data as { mgm_bld_pk_new?: unknown }
+  const newPk = String(d.mgm_bld_pk_new ?? '').trim()
+  if (!newPk) {
+    return { newPk: '', error: '해당 PK의 신규 PK 정보가 등재되어 있지 않습니다.' }
+  }
+  return { newPk, error: '' }
+}
+
 export interface RegionCandidate {
   /** 시/도 (예: 부산광역시) */
   si: string
@@ -240,4 +261,31 @@ export function parseKeygenResponse(data: unknown): KeygenParse {
       legalCode: `${String(d.sigungu_cd ?? '').trim()}${String(d.bjdong_cd ?? '').trim()}`,
     },
   }
+}
+
+/**
+ * 입력이 주소가 아니라 표준연계키(PK) 형식인지 감지.
+ * 구형: "11680-12777"(시군구코드 5자리 - 일련번호) / 신형: 10자리 숫자(예: 1024112777).
+ * 신형 PK는 mgm_bld_pk_info에서 조회되지 않아(실서버 "Cannot match") 구분이 필요하다.
+ */
+export function detectPkKind(input: string): 'old' | 'new' | null {
+  const v = input.trim()
+  if (/^\d{5}-\d+$/.test(v)) return 'old'
+  if (/^\d{10}$/.test(v)) return 'new'
+  return null
+}
+
+/**
+ * legcd_n_coord 응답에서 위경도 추출 — x(경도)/y(위도)는 서버가 이미 WGS84로 변환해 준다
+ * (2026-07-28 실측: {"x":127.036...,"y":37.500...,"ori_x":"959032...","ori_y":"1944630..."}).
+ */
+export function extractCoord(raw: unknown): { lat: number; lng: number } | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const d = raw as Record<string, unknown>
+  const lng = Number(d.x)
+  const lat = Number(d.y)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  // 대한민국 위경도 대략 범위 검증 — 0이나 EPSG:5179 원시값이 x/y로 오는 오응답 차단
+  if (lat < 32 || lat > 40 || lng < 123 || lng > 133) return null
+  return { lat, lng }
 }

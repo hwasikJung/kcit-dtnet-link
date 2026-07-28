@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import { PK_PATTERN, colLetter, parseBulkSheet } from '~/lib/bulk-parse'
+import { PK_PATTERN, colLetter, parseBulkSheet, pasteToAoa } from '~/lib/bulk-parse'
+
+describe('pasteToAoa', () => {
+  it('줄 단위로 행을 만든다', () => {
+    expect(pasteToAoa('주소\n서울시 A\n서울시 B')).toEqual([['주소'], ['서울시 A'], ['서울시 B']])
+  })
+
+  it('탭 구분 열을 보존한다(엑셀 표 복사)', () => {
+    expect(pasteToAoa('주소\t비고\n서울시 A\t메모1')).toEqual([
+      ['주소', '비고'],
+      ['서울시 A', '메모1'],
+    ])
+  })
+
+  it('CRLF·빈 줄·앞뒤 공백을 정리한다', () => {
+    expect(pasteToAoa('서울시 A\r\n\r\n  서울시 B  \n\n')).toEqual([['서울시 A'], ['서울시 B']])
+  })
+
+  it('탭만 있는 줄은 빈 줄로 취급한다', () => {
+    expect(pasteToAoa('\t\t\n서울시 A')).toEqual([['서울시 A']])
+  })
+
+  it('parseBulkSheet와 이어 쓰면 헤더·중복 감지가 그대로 동작한다', () => {
+    const r = parseBulkSheet(pasteToAoa('mgmBldPk\n11680-12777\n11680-12777'))
+    expect(r.hadHeader).toBe(true)
+    expect(r.rows).toHaveLength(2)
+    expect(r.rows[1]!.invalid).toBe('duplicate')
+  })
+})
 
 describe('PK_PATTERN', () => {
   it('숫자·하이픈 조합만 PK로 인정한다', () => {

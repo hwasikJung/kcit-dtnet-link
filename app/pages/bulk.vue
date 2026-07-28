@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -9,7 +9,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { BULK_COLUMNS, flattenBldInfo } from '~/lib/bulk-columns'
-import { parseBulkSheet } from '~/lib/bulk-parse'
+import { parseBulkSheet, pasteToAoa } from '~/lib/bulk-parse'
+import { parseBulkHistoryFile, serializeBulkHistory } from '~/lib/history-io'
 import { extractRegionCandidates, type RegionCandidate } from '~/lib/keygen'
 import { KEYGEN_COLUMNS, flattenKeygenResult, parseAddrSheet } from '~/lib/keygen-bulk'
 import type { BulkHistoryMeta, BulkResultRecord, BulkRow } from '~/types/bulk'
@@ -35,6 +36,8 @@ const MODES: Record<
     sampleName: string
     downloadSuffix: string
     parse: (aoa: unknown[][]) => { hadHeader: boolean; extraHeaders: string[]; rows: BulkRow[] }
+    /** 행 1건 처리에 실제 호출되는 기능 경로 — 화면에 작게 표기 */
+    apiPaths: string[]
   }
 > = {
   keygen: {
@@ -57,6 +60,7 @@ const MODES: Record<
     sampleName: '주소기반일괄생성_샘플.xlsx',
     downloadSuffix: '_키생성결과.xlsx',
     parse: parseAddrSheet,
+    apiPaths: ['/sqiapi/addr/building_match_clean_union', '/sqiapi/addr/asis/juso'],
   },
   info: {
     tab: 'PK기반 일괄처리',
@@ -71,6 +75,7 @@ const MODES: Record<
     sampleName: 'PK기반일괄조회_샘플.xlsx',
     downloadSuffix: '_조회결과.xlsx',
     parse: parseBulkSheet,
+    apiPaths: ['/sqiapi/addr/mgm_bld_pk_info/{mgmbldpk}'],
   },
 }
 
@@ -107,6 +112,8 @@ function switchMode(next: BulkMode) {
   extraHeaders.value = []
   finished.value = false
   progress.value = { done: 0, total: 0 }
+  pasteOpen.value = false
+  pasteText.value = ''
 }
 
 const validCount = computed(() => rows.value.filter((r) => !r.invalid).length)
@@ -157,6 +164,11 @@ async function onFileChange(ev: Event) {
     return
   }
 
+  applyParsed(aoa, file.name, '엑셀에서 데이터 행을 찾지 못했습니다.')
+}
+
+/** 파싱 결과를 화면 상태에 적용 — 파일 업로드·텍스트 붙여넣기 공용 */
+function applyParsed(aoa: unknown[][], sourceName: string, emptyMsg: string) {
   const parsed = cfg.value.parse(aoa)
 
   if (parsed.rows.length > MAX_ROWS) {
@@ -171,11 +183,31 @@ async function onFileChange(ev: Event) {
   extraHeaders.value = parsed.extraHeaders
   rows.value = parsed.rows
 
-  fileName.value = file.name
+  fileName.value = sourceName
   finished.value = false
   progress.value = { done: 0, total: 0 }
 
-  if (!rows.value.length) toast('엑셀에서 데이터 행을 찾지 못했습니다.', 'error')
+  if (!rows.value.length) toast(emptyMsg, 'error')
+}
+
+// 텍스트 붙여넣기 입력 — 파일 없이 줄 단위(엑셀 표 복사는 탭 구분 열 보존)로 목록을 만든다
+const pasteOpen = ref(false)
+const pasteText = ref('')
+/** 붙여넣기 입력란 placeholder — 탭별 샘플 데이터 재사용 */
+const pastePlaceholder = computed(() =>
+  cfg.value.sample
+    .slice(1)
+    .map((r) => r[0])
+    .join('\n'),
+)
+
+function loadPasted() {
+  if (running.value || !pasteText.value.trim()) return
+  applyParsed(
+    pasteToAoa(pasteText.value),
+    '붙여넣기 입력',
+    '붙여넣은 텍스트에서 데이터 행을 찾지 못했습니다.',
+  )
 }
 
 /** A열 값 1건 처리 — 모드에 따라 대장 정보 조회 또는 키 생성 호출 */
@@ -221,8 +253,12 @@ async function lookupOne(
   }
 }
 
+// 중단 요청 — 진행 중인 호출은 마치고 새 행을 꺼내지 않는다(처리분은 그대로 저장)
+const cancelRequested = ref(false)
+
 async function executeLookups(keys: string[]) {
   running.value = true
+  cancelRequested.value = false
   progress.value = { done: 0, total: keys.length }
 
   async function lookup(key: string) {
@@ -237,12 +273,15 @@ async function executeLookups(keys: string[]) {
   const queue = [...keys]
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-      for (let key = queue.shift(); key != null; key = queue.shift()) await lookup(key)
+      for (let key = queue.shift(); key != null && !cancelRequested.value; key = queue.shift())
+        await lookup(key)
     }),
   )
 
   running.value = false
   finished.value = true
+  if (cancelRequested.value)
+    toast(`중단했습니다. 처리된 ${progress.value.done}건까지 저장·다운로드할 수 있습니다.`)
 }
 
 // 마지막 처리의 이력 id — 재시도 시 같은 id로 덮어써 이력이 중복 생성되지 않게 한다
@@ -337,6 +376,63 @@ async function removeHistory(meta: BulkHistoryMeta) {
 /** 이력 레코드의 처리 종류 — kind 없는 과거 레코드는 대장 정보 조회 */
 const kindOf = (r: { kind?: BulkMode }) => r.kind ?? 'info'
 
+// 이력 내보내기/가져오기 — 브라우저(IndexedDB)에만 있는 이력을 JSON 파일로 옮긴다(PC 교체·공유용)
+async function exportHistory() {
+  const records: BulkResultRecord[] = []
+  for (const meta of history.items.value) {
+    const r = await history.get(meta.id)
+    if (r) records.push(r)
+  }
+  if (!records.length) return
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`
+  const blob = new Blob([serializeBulkHistory(records, now.getTime())], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `일괄처리이력_${stamp}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  toast(`이력 ${records.length}건을 파일로 내보냈습니다.`)
+}
+
+async function onImportHistory(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  let parsed: ReturnType<typeof parseBulkHistoryFile>
+  try {
+    parsed = parseBulkHistoryFile(await file.text())
+  } catch (e) {
+    toast((e as Error).message, 'error')
+    return
+  }
+  if (!parsed.records.length) {
+    toast('파일에 가져올 이력이 없습니다.', 'error')
+    return
+  }
+  const existing = new Set(history.items.value.map((i) => i.id))
+  let added = 0
+  let dup = 0
+  // 오래된 것부터 저장 — 보관 한도(최근 20건) 초과 시 최신 이력이 남도록
+  for (const r of [...parsed.records].sort((a, b) => a.createdAt - b.createdAt)) {
+    if (existing.has(r.id)) {
+      dup++
+      continue
+    }
+    await history.save(r)
+    added++
+  }
+  const parts = [`이력 ${added}건을 가져왔습니다.`]
+  if (dup) parts.push(`이미 있는 ${dup}건 제외.`)
+  if (parsed.skipped) parts.push(`형식 오류 ${parsed.skipped}건 제외.`)
+  toast(parts.join(' '))
+}
+
 function formatDate(ts: number) {
   const d = new Date(ts)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -371,6 +467,7 @@ function formatDate(ts: number) {
     <p class="mt-3 text-sm text-muted-foreground">
       {{ cfg.desc }} 결과는 이 브라우저의 이력에 저장됩니다.
     </p>
+    <ApiUsageNote class="mt-1" :paths="cfg.apiPaths" />
 
     <!-- 업로드 -->
     <section class="mt-4 rounded-lg border p-4">
@@ -390,11 +487,37 @@ function formatDate(ts: number) {
           @change="onFileChange"
         />
         <Button variant="outline" @click="downloadSample">샘플 파일 받기</Button>
+        <Button variant="outline" :disabled="running" @click="pasteOpen = !pasteOpen">
+          텍스트 붙여넣기
+        </Button>
         <span v-if="fileName" class="text-sm">{{ fileName }}</span>
         <span class="text-xs text-muted-foreground">
           {{ cfg.hint }} · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행 · B열~ 원본
           열은 결과 엑셀에 보존
         </span>
+      </div>
+
+      <!-- 텍스트 붙여넣기 — 파일 없이 줄 단위 입력, 엑셀 표 복사(탭 구분)도 열 그대로 보존 -->
+      <div v-if="pasteOpen" class="mt-4 border-t pt-4">
+        <label for="bulk-paste" class="text-sm font-medium">텍스트로 붙여넣기</label>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ cfg.keyLabel }}를 한 줄에 하나씩 입력하세요. 엑셀에서 복사한 표(여러 열)도 그대로
+          붙여넣을 수 있습니다(첫 열 = {{ cfg.keyLabel }}).
+        </p>
+        <textarea
+          id="bulk-paste"
+          v-model="pasteText"
+          rows="8"
+          class="mt-2 w-full resize-y rounded-md border bg-transparent px-3 py-2 font-mono text-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          :placeholder="pastePlaceholder"
+          :disabled="running"
+        />
+        <div class="mt-2 flex gap-2">
+          <Button :disabled="running || !pasteText.trim()" @click="loadPasted"
+            >목록 불러오기</Button
+          >
+          <Button variant="ghost" @click="pasteOpen = false">닫기</Button>
+        </div>
       </div>
 
       <div v-if="rows.length" class="mt-4 flex flex-wrap items-center gap-3">
@@ -408,6 +531,14 @@ function formatDate(ts: number) {
               ? `처리 중 ${progress.done} / ${progress.total}`
               : `${cfg.runLabel} 실행 (${validCount}건)`
           }}
+        </Button>
+        <Button
+          v-if="running"
+          variant="outline"
+          :disabled="cancelRequested"
+          @click="cancelRequested = true"
+        >
+          {{ cancelRequested ? '중단 중…' : '중단' }}
         </Button>
         <Button v-if="finished && retryCount" variant="outline" @click="retryFailed">
           실패 {{ retryCount }}건 재시도
@@ -457,9 +588,36 @@ function formatDate(ts: number) {
 
     <!-- 저장된 이력 -->
     <section class="mt-10">
-      <h2 class="mb-3 text-sm font-medium text-muted-foreground">
-        저장된 처리 이력 (클릭 시 결과 보기)
-      </h2>
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-medium text-muted-foreground">
+          저장된 처리 이력 (클릭 시 결과 보기)
+        </h2>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="!history.items.value.length"
+            @click="exportHistory"
+          >
+            이력 내보내기
+          </Button>
+          <label
+            for="history-import"
+            :class="buttonVariants({ variant: 'outline', size: 'sm' })"
+            class="cursor-pointer"
+          >
+            이력 가져오기
+          </label>
+          <input
+            id="history-import"
+            type="file"
+            accept=".json,application/json"
+            class="sr-only"
+            aria-label="이력 파일 가져오기"
+            @change="onImportHistory"
+          />
+        </div>
+      </div>
       <p
         v-if="!history.items.value.length"
         class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground"

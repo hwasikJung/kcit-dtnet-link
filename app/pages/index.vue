@@ -1,28 +1,45 @@
 <script setup lang="ts">
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogScrollContent,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  detectPkKind,
   extractAddrSuggestions,
+  extractCoord,
   extractDongInfo,
   extractRegionCandidates,
   isRegionListTruncated,
+  parseConvertResponse,
   parseKeygenResponse,
   splitPks,
   type AddrSuggestion,
+  type ConvertResult,
   type DongInfo,
   type KeygenParse,
   type RegionCandidate,
 } from '~/lib/keygen'
+import { GRADE_DISCLAIMER, describeGrade, describeLevel } from '~/lib/match-grade'
 
 /** 단건 생성에 사용하는 대표 기능 — 주소정제 후 건축물대장번호 매칭 (3차년도) */
 const MATCH_PATH = '/sqiapi/addr/building_match_clean_union'
 /** 키 카드에서 건축물대장 정보로 이어지는 기능 */
 const INFO_PATH = '/sqiapi/addr/mgm_bld_pk_info/{mgmbldpk}'
-/** 키 카드에서 기존 건축물대장 PK → 신규 PK 변환으로 이어지는 기능 */
+/** 키 카드의 신규 PK 전환 모달에서 직접 호출하는 기능 — 기존 건축물대장 PK → 신규 PK 변환 */
 const CONVERT_PATH = '/sqiapi/addr/convert_mgm_bld_pk_old_to_new'
 /** 다지역 모호 감지에 사용하는 주소검색 기능(주소기반산업지원서비스) */
 const JUSO_PATH = '/sqiapi/addr/asis/juso'
+/** PK 직접 입력 시 신규 PK를 기존 PK로 되돌리는 기능 — 신규 PK는 대장 정보 조회가 안 된다 */
+const NEW2OLD_PATH = '/sqiapi/addr/convert_mgm_bld_pk_new_to_old'
+/** 위치 표시용 좌표 조회 기능 — x/y가 이미 WGS84로 변환되어 온다(2026-07-28 실측) */
+const COORD_PATH = '/sqiapi/addr/legcd_n_coord'
 
 // 지역 접두 없는 짧은 주소 — '대청로 119'는 부산 중구·하남시·보령시 3곳에 존재해 다지역 선택 카드가 뜨고,
 // 나머지 둘은 후보 지역이 1곳뿐이라 바로 키가 생성된다
@@ -67,6 +84,13 @@ onMounted(() => {
   }
 })
 
+// 주소 대신 표준연계키(PK)를 입력한 경우 — 생성 대신 조회·전환 액션 패널을 띄운다
+const pkKind = computed(() => detectPkKind(addr.value))
+
+/** 생성 주소의 위경도(WGS84) — 키 카드의 위치 행·미니 지도에 사용, 조회 실패 시 행 자체를 숨긴다 */
+const coord = ref<{ lat: number; lng: number } | null>(null)
+const mapOpen = ref(false)
+
 const success = computed(() => (parsed.value?.ok ? parsed.value.result : null))
 /** 총괄표제부 PK 목록 — 서버가 콤마 구분 다건으로 줄 수 있다 */
 const upperPks = computed(() => (success.value ? splitPks(success.value.upperPk) : []))
@@ -83,6 +107,8 @@ const mainPk = computed(() => {
   return upperPks.value[0] || (r.pks.length === 1 ? r.pks[0]! : '')
 })
 const mainPkLabel = computed(() => (success.value?.upperPk ? '총괄표제부 PK' : '표제부 PK'))
+/** 매칭 등급의 잠정 한글 설명 — 알 수 없는 등급이면 null(코드만 표기) */
+const gradeInfo = computed(() => (success.value ? describeGrade(success.value.grade) : null))
 /** 표제부 PK 전체 목록 — 총괄 PK가 있거나 2건 이상일 때만 별도 목록으로 노출 */
 const pkList = computed(() => {
   const r = success.value
@@ -193,7 +219,8 @@ function closeSuggest() {
 function onAddrInput(e: Event) {
   const q = (e.target as HTMLInputElement).value.trim()
   clearTimeout(suggestTimer)
-  if (q.length < 2) {
+  // PK 형식 입력이면 주소 자동완성은 무의미 — 검색하지 않는다
+  if (q.length < 2 || detectPkKind(q)) {
     closeSuggest()
     return
   }
@@ -245,7 +272,7 @@ function onAddrKeydown(e: KeyboardEvent) {
 
 async function generate() {
   const address = addr.value.trim()
-  if (!address || loading.value) return
+  if (!address || loading.value || pkKind.value) return
 
   closeSuggest()
   lastAddr.value = address
@@ -263,6 +290,8 @@ async function generate() {
   groupOpen.value = {}
   regionChoices.value = []
   regionsTruncated.value = false
+  coord.value = null
+  mapOpen.value = false
   router.replace({ query: { addr: address } })
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -285,6 +314,14 @@ async function generate() {
       truncated: isRegionListTruncated(data),
     }),
     () => ({ regions: [] as RegionCandidate[], truncated: false }),
+  )
+  // 위치 좌표 — 실패 시 위치 표시만 생략(fail-open)
+  const coordP = $fetch(apiBase + COORD_PATH, {
+    query: { input_addr: address },
+    timeout: 5000,
+  }).then(
+    (data) => extractCoord(data),
+    () => null,
   )
 
   // 실제 호출은 1회지만 정제 → 매칭 → 생성 과정을 단계로 보여준다
@@ -321,6 +358,8 @@ async function generate() {
     stepStates.value = ['done', 'done', 'done']
     parsed.value = p
     history.add({ addr: address, upperPk: p.result.upperPk, pks: p.result.pks, ok: true })
+    // 성공한 경우에만 위치 표시 — 다지역·실패 케이스의 좌표는 임의 지역일 수 있어 쓰지 않는다
+    coord.value = await coordP
     // 동 정보(동 이름·주/부속 구분)는 결과 표시를 막지 않도록 백그라운드로 이어서 조회
     void loadDongInfos()
   }
@@ -328,6 +367,41 @@ async function generate() {
 
   await nextTick()
   resultSection.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
+}
+
+// 신규 PK 전환 모달 — 페이지 이동 없이 변환 기능을 직접 호출해 결과를 보여준다
+const convertOpen = ref(false)
+/** 변환 대상(기존) PK */
+const convertSrcPk = ref('')
+const convertLoading = ref(false)
+const convertRaw = ref<unknown>(null)
+const convertResult = ref<ConvertResult | null>(null)
+const convertNetError = ref('')
+// 모달을 빠르게 다시 열었을 때 이전 호출 결과를 무시하는 실행 토큰
+let convertRunId = 0
+
+async function openConvert(pk: string) {
+  convertOpen.value = true
+  convertSrcPk.value = pk
+  convertLoading.value = true
+  convertRaw.value = null
+  convertResult.value = null
+  convertNetError.value = ''
+  const run = ++convertRunId
+  try {
+    const data = await $fetch(useRuntimeConfig().public.apiBase + CONVERT_PATH, {
+      query: { mgm_bld_pk: pk },
+      timeout: 10000,
+    })
+    if (run !== convertRunId) return
+    convertRaw.value = data
+    convertResult.value = parseConvertResponse(data)
+  } catch {
+    if (run !== convertRunId) return
+    convertNetError.value = '서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+  } finally {
+    if (run === convertRunId) convertLoading.value = false
+  }
 }
 
 async function copy(text: string) {
@@ -465,10 +539,54 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             </li>
           </ul>
         </div>
-        <Button class="h-11 px-6" :disabled="loading || !addr.trim()" @click="generate()">
+        <Button
+          class="h-11 px-6"
+          :disabled="loading || !addr.trim() || !!pkKind"
+          @click="generate()"
+        >
           {{ loading ? '생성 중…' : '표준연계키 생성' }}
         </Button>
       </div>
+
+      <!-- PK 직접 입력 감지 — 주소 생성 대신 조회·전환 액션 제시 -->
+      <div v-if="pkKind" class="mt-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+        <p class="text-sm font-medium">
+          표준연계키({{ pkKind === 'old' ? '기존' : '신규' }} 형식)가 입력되었습니다
+        </p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          <template v-if="pkKind === 'old'">
+            이미 생성된 키라면 주소 입력 없이 바로 조회하거나 전환할 수 있습니다.
+          </template>
+          <template v-else>
+            신규 형식 키는 건축물대장 정보 조회가 되지 않아, 먼저 기존 PK로 전환한 뒤 조회할 수
+            있습니다.
+          </template>
+        </p>
+        <div class="mt-2.5 flex flex-wrap gap-2">
+          <template v-if="pkKind === 'old'">
+            <NuxtLink
+              :to="{ path: '/tools', query: { path: INFO_PATH, mgmbldpk: addr.trim(), run: '1' } }"
+              :class="buttonVariants({ variant: 'outline', size: 'sm' })"
+            >
+              건축물대장 정보 보기
+            </NuxtLink>
+            <Button variant="outline" size="sm" @click="openConvert(addr.trim())">
+              신규 PK 전환
+            </Button>
+          </template>
+          <NuxtLink
+            v-else
+            :to="{
+              path: '/tools',
+              query: { path: NEW2OLD_PATH, mgm_bld_pk_new: addr.trim(), run: '1' },
+            }"
+            :class="buttonVariants({ variant: 'outline', size: 'sm' })"
+          >
+            기존 PK로 전환
+          </NuxtLink>
+        </div>
+      </div>
+
       <div class="mt-3 flex flex-wrap items-center gap-1.5">
         <span class="mr-1 text-xs text-muted-foreground">예시 주소:</span>
         <button
@@ -507,6 +625,11 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             <p class="text-[11px] text-muted-foreground">{{ step.desc }}</p>
           </div>
         </template>
+        <!-- 생성 1회에 실제 호출되는 기능 — 매칭 + 다지역 감지용 주소검색 + 위치 좌표 -->
+        <ApiUsageNote
+          class="col-span-full mt-2 justify-center"
+          :paths="[MATCH_PATH, JUSO_PATH, COORD_PATH]"
+        />
       </div>
     </section>
 
@@ -564,6 +687,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
               동 정보 불러오는 중…
             </span>
           </div>
+          <ApiUsageNote class="mt-0.5" label="동 정보 조회" :paths="[INFO_PATH]" />
           <p v-if="!dongLoaded" class="mt-0.5 text-xs text-muted-foreground">
             주거동 외 부속건축물(주차장·경비실 등)·상가가 동별로 포함될 수 있습니다
           </p>
@@ -623,16 +747,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
               >
                 대장 정보
               </NuxtLink>
-              <NuxtLink
-                :to="{
-                  path: '/tools',
-                  query: { path: CONVERT_PATH, mgm_bld_pk: g.upperPk, run: '1' },
-                }"
-                :class="buttonVariants({ variant: 'ghost', size: 'sm' })"
-                class="h-7 text-xs"
-              >
+              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openConvert(g.upperPk)">
                 신규 PK 전환
-              </NuxtLink>
+              </Button>
             </div>
             <div
               v-else-if="g.key === 'etc'"
@@ -725,14 +842,70 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
           <dd class="border-b py-2.5">{{ success.platAddr || '—' }}</dd>
           <dt class="border-b py-2.5 text-muted-foreground">법정동코드</dt>
           <dd class="border-b py-2.5 font-mono text-[13px]">{{ success.legalCode || '—' }}</dd>
-          <dt class="py-2.5 text-muted-foreground">매칭 등급</dt>
-          <dd class="py-2.5">
+          <dt class="py-2.5 text-muted-foreground" :class="coord ? 'border-b' : ''">매칭 등급</dt>
+          <dd
+            class="flex flex-wrap items-center gap-x-2 gap-y-1 py-2.5"
+            :class="coord ? 'border-b' : ''"
+          >
             <span v-if="success.grade" class="font-mono text-[13px]">
               {{ success.grade }}<template v-if="success.level"> · {{ success.level }}</template>
             </span>
             <template v-else>—</template>
+            <template v-if="gradeInfo">
+              <span class="text-xs text-muted-foreground">{{ gradeInfo.short }}</span>
+              <TooltipProvider :delay-duration="200">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      aria-label="매칭 등급 설명"
+                      class="flex size-4 items-center justify-center rounded-full border text-[10px] text-muted-foreground hover:bg-primary/5"
+                    >
+                      ?
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-72">
+                    <p class="font-medium">{{ success.grade }} — {{ gradeInfo.short }}</p>
+                    <p class="mt-1">{{ gradeInfo.desc }}</p>
+                    <p v-if="success.level && describeLevel(success.level)" class="mt-1">
+                      {{ success.level }}: {{ describeLevel(success.level) }}
+                    </p>
+                    <p class="mt-1.5 opacity-70">{{ GRADE_DISCLAIMER }}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </template>
           </dd>
+          <template v-if="coord">
+            <dt class="py-2.5 text-muted-foreground">위치</dt>
+            <dd class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+              <span class="font-mono text-[13px]">
+                {{ coord.lat.toFixed(6) }}, {{ coord.lng.toFixed(6) }}
+              </span>
+              <button
+                type="button"
+                class="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                :aria-expanded="mapOpen"
+                @click="mapOpen = !mapOpen"
+              >
+                {{ mapOpen ? '지도 접기' : '지도에서 위치 확인' }}
+              </button>
+              <a
+                :href="`https://map.kakao.com/link/map/${encodeURIComponent(success.cleanAddr || lastAddr)},${coord.lat},${coord.lng}`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              >
+                카카오맵 ↗
+              </a>
+            </dd>
+          </template>
         </dl>
+
+        <!-- 미니 지도 — 펼칠 때만 Leaflet을 로드한다 -->
+        <div v-if="coord && mapOpen" class="px-5 pb-4">
+          <MiniMap :lat="coord.lat" :lng="coord.lng" :label="success.cleanAddr || lastAddr" />
+        </div>
 
         <div class="flex flex-wrap gap-2 border-t px-5 py-3.5">
           <NuxtLink
@@ -742,16 +915,9 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
           >
             건축물대장 정보 보기
           </NuxtLink>
-          <NuxtLink
-            v-if="mainPk"
-            :to="{
-              path: '/tools',
-              query: { path: CONVERT_PATH, mgm_bld_pk: mainPk, run: '1' },
-            }"
-            :class="buttonVariants({ variant: 'outline', size: 'sm' })"
-          >
+          <Button v-if="mainPk" variant="outline" size="sm" @click="openConvert(mainPk)">
             신규 PK 전환
-          </NuxtLink>
+          </Button>
           <NuxtLink
             :to="{ path: '/tools', query: { path: MATCH_PATH, input_addr: lastAddr, run: '1' } }"
             :class="buttonVariants({ variant: 'outline', size: 'sm' })"
@@ -890,5 +1056,50 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         이 브라우저에만 저장됩니다. 항목을 클릭하면 해당 주소로 다시 생성합니다.
       </p>
     </section>
+
+    <!-- 신규 PK 전환 Modal — 페이지 이동 없이 변환 결과 표시 -->
+    <Dialog v-model:open="convertOpen">
+      <DialogScrollContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>신규 PK 전환</DialogTitle>
+          <DialogDescription> 기존 건축물대장 PK를 신규 형식의 PK로 변환합니다 </DialogDescription>
+        </DialogHeader>
+        <dl class="grid grid-cols-[5.5rem_1fr] items-center gap-y-1 text-sm">
+          <dt class="py-1.5 text-muted-foreground">기존 PK</dt>
+          <dd class="py-1.5 font-mono break-all">{{ convertSrcPk }}</dd>
+          <dt class="py-1.5 text-muted-foreground">신규 PK</dt>
+          <dd class="py-1.5">
+            <span v-if="convertLoading" class="flex items-center gap-2 text-muted-foreground">
+              <span
+                class="size-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+              />
+              변환 중…
+            </span>
+            <span v-else-if="convertNetError" class="text-destructive">
+              {{ convertNetError }}
+            </span>
+            <span v-else-if="convertResult?.error" class="text-muted-foreground">
+              {{ convertResult.error }}
+            </span>
+            <span
+              v-else-if="convertResult?.newPk"
+              class="flex flex-wrap items-center gap-2 font-mono text-lg font-semibold break-all"
+            >
+              {{ convertResult.newPk }}
+              <Button variant="outline" size="sm" @click="copy(convertResult.newPk)">복사</Button>
+            </span>
+          </dd>
+        </dl>
+        <ApiUsageNote :paths="[CONVERT_PATH]" />
+        <details v-if="convertRaw != null">
+          <summary class="cursor-pointer text-xs text-muted-foreground select-none">
+            원본 응답(JSON) 보기 — 검증용
+          </summary>
+          <div class="mt-2 overflow-x-auto rounded-lg border bg-card p-3">
+            <JsonViewer :data="convertRaw" />
+          </div>
+        </details>
+      </DialogScrollContent>
+    </Dialog>
   </main>
 </template>

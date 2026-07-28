@@ -33,6 +33,15 @@ export function extraCells(r: unknown[] | undefined, width: number): string[] | 
   return Array.from({ length: width }, (_, i) => String(r?.[i + 1] ?? ''))
 }
 
+/** 붙여넣은 텍스트 → 시트 AOA 변환 — 줄 = 행, 탭 = 열 구분(엑셀 표 복사 호환).
+ * 완전히 빈 줄은 건너뛴다(주소에 콤마가 흔해 콤마는 구분자로 쓰지 않는다) */
+export function pasteToAoa(text: string): string[][] {
+  return text
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.split('\t').map((c) => c.trim()))
+    .filter((cells) => cells.some((c) => c !== ''))
+}
+
 /** 시트 AOA(배열의 배열) → 헤더 감지 결과 + 원본 B열~ 헤더 + 조회 전 상태의 BulkRow 목록 */
 export function parseBulkSheet(aoa: unknown[][]): {
   hadHeader: boolean

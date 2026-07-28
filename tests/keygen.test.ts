@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  detectPkKind,
   extractAddrSuggestions,
+  extractCoord,
   extractDongInfo,
   extractDongLabel,
   extractRegionCandidates,
   isRegionListTruncated,
+  parseConvertResponse,
   parseKeygenResponse,
   splitPks,
 } from '~/lib/keygen'
@@ -33,6 +36,57 @@ const SUCCESS_NO_UPPER = {
   road_plat_addr: '서울특별시 중구 세종대로 110',
   clean_addr: '서울특별시 중구 세종대로 110',
 }
+
+describe('extractCoord', () => {
+  // 2026-07-28 실서버(legcd_n_coord) 응답 스냅샷 — x/y는 서버가 WGS84로 변환해 준다
+  const REAL = {
+    leg_cd: '1168010100',
+    x: 127.03651533461792,
+    y: 37.500026685739115,
+    ori_x: '959032.453894097',
+    ori_y: '1944630.15554828',
+  }
+
+  it('실서버 응답에서 위경도를 추출한다', () => {
+    expect(extractCoord(REAL)).toEqual({ lat: 37.500026685739115, lng: 127.03651533461792 })
+  })
+
+  it('문자열 숫자도 허용한다', () => {
+    expect(extractCoord({ x: '127.03', y: '37.5' })).toEqual({ lat: 37.5, lng: 127.03 })
+  })
+
+  it('좌표가 없거나 오류 응답이면 null', () => {
+    expect(extractCoord({ error: 'cannot match address' })).toBeNull()
+    expect(extractCoord(null)).toBeNull()
+    expect(extractCoord([])).toBeNull()
+    expect(extractCoord({ x: 'abc', y: 'def' })).toBeNull()
+  })
+
+  it('대한민국 위경도 범위를 벗어나면 null (0값·미변환 EPSG:5179 원시값 차단)', () => {
+    expect(extractCoord({ x: 0, y: 0 })).toBeNull()
+    expect(extractCoord({ x: 959032.45, y: 1944630.15 })).toBeNull()
+  })
+})
+
+describe('detectPkKind', () => {
+  it('구형 PK(시군구 5자리-일련번호)를 감지한다', () => {
+    expect(detectPkKind('11680-12777')).toBe('old')
+    expect(detectPkKind(' 41287-100223575 ')).toBe('old')
+  })
+
+  it('신형 PK(10자리 숫자)를 감지한다', () => {
+    expect(detectPkKind('1024112777')).toBe('new')
+  })
+
+  it('주소·일반 입력은 감지하지 않는다', () => {
+    expect(detectPkKind('대청로 119')).toBeNull()
+    expect(detectPkKind('홍은동 455')).toBeNull()
+    expect(detectPkKind('123-456')).toBeNull() // 시군구 5자리 아님
+    expect(detectPkKind('123456789')).toBeNull() // 9자리
+    expect(detectPkKind('12345678901')).toBeNull() // 11자리
+    expect(detectPkKind('')).toBeNull()
+  })
+})
 
 describe('splitPks', () => {
   it('콤마 구분 문자열을 목록으로 분해한다', () => {
@@ -274,6 +328,27 @@ describe('extractRegionCandidates', () => {
     expect(extractRegionCandidates({ results: {} })).toEqual([])
     expect(extractRegionCandidates(null)).toEqual([])
     expect(extractRegionCandidates('oops')).toEqual([])
+  })
+})
+
+describe('parseConvertResponse', () => {
+  it('신규 PK를 파싱한다', () => {
+    // 2026-07-28 실서버(convert_mgm_bld_pk_old_to_new, 11680-12777) 응답 스냅샷 기반
+    expect(parseConvertResponse({ mgm_bld_pk_new: '1024112777' })).toEqual({
+      newPk: '1024112777',
+      error: '',
+    })
+  })
+
+  it('미존재 PK는 null로 오므로 실패로 판정한다', () => {
+    const r = parseConvertResponse({ mgm_bld_pk_new: null })
+    expect(r.newPk).toBe('')
+    expect(r.error).toContain('등재')
+  })
+
+  it('객체가 아닌 응답은 형식 오류로 판정한다', () => {
+    expect(parseConvertResponse(null).error).toContain('형식')
+    expect(parseConvertResponse('oops').error).toContain('형식')
   })
 })
 

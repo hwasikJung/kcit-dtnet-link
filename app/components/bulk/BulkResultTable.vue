@@ -20,13 +20,35 @@ const emit = defineEmits<{ rowClick: [row: BulkRow] }>()
 
 const PAGE_SIZE = 100
 const page = ref(1)
-const pageCount = computed(() => Math.max(1, Math.ceil(props.rows.length / PAGE_SIZE)))
-const paged = computed(() => props.rows.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+
+// 상태 필터 — 요약 칩 클릭 시 해당 상태 행만 표시(다시 클릭하면 해제)
+const FILTERABLE = ['success', 'notfound', 'error', 'pending'] as const
+const statusFilter = ref<BulkRow['status'] | 'all'>('all')
+const statusCount = computed(() => {
+  const count: Record<BulkRow['status'], number> = { pending: 0, success: 0, notfound: 0, error: 0 }
+  for (const row of props.rows) count[row.status]++
+  return count
+})
+const filtered = computed(() =>
+  statusFilter.value === 'all'
+    ? props.rows
+    : props.rows.filter((r) => r.status === statusFilter.value),
+)
+function toggleFilter(s: BulkRow['status']) {
+  statusFilter.value = statusFilter.value === s ? 'all' : s
+  page.value = 1
+}
+
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
+const paged = computed(() =>
+  filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
+)
 
 watch(
   () => props.rows,
   () => {
     page.value = 1
+    statusFilter.value = 'all'
   },
 )
 
@@ -50,6 +72,37 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
   <!-- min-w-0: Dialog(grid) 안에서 grid 자식의 min-width:auto가 테이블 내용폭만큼
        커져 Modal 밖으로 넘치는 것을 막고 overflow-x-auto가 동작하게 함 -->
   <div class="min-w-0">
+    <!-- 상태 요약 칩 — 클릭 시 해당 상태만 필터, 다시 클릭하면 전체 -->
+    <div class="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+      <button
+        type="button"
+        class="rounded-full border px-2.5 py-0.5 transition-colors"
+        :class="
+          statusFilter === 'all'
+            ? 'border-transparent bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-primary/5'
+        "
+        @click="((statusFilter = 'all'), (page = 1))"
+      >
+        전체 {{ rows.length }}
+      </button>
+      <template v-for="s in FILTERABLE" :key="s">
+        <button
+          v-if="statusCount[s]"
+          type="button"
+          class="rounded-full border px-2.5 py-0.5 transition-colors"
+          :class="
+            statusFilter === s
+              ? 'border-transparent bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-primary/5'
+          "
+          :aria-pressed="statusFilter === s"
+          @click="toggleFilter(s)"
+        >
+          {{ STATUS_LABEL[s] }} {{ statusCount[s] }}
+        </button>
+      </template>
+    </div>
     <div class="overflow-x-auto rounded-lg border">
       <table class="w-full min-w-max text-left text-sm">
         <thead>
@@ -91,6 +144,14 @@ const STATUS_CLASS: Record<BulkRow['status'], string> = {
               :title="row.cols[c.key]"
             >
               {{ row.cols[c.key] }}
+            </td>
+          </tr>
+          <tr v-if="!paged.length">
+            <td
+              :colspan="3 + columns.length"
+              class="px-3 py-6 text-center text-xs text-muted-foreground"
+            >
+              해당 상태의 행이 없습니다.
             </td>
           </tr>
         </tbody>
