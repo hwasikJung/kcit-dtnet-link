@@ -9,6 +9,16 @@ onMounted(() => {
 })
 onBeforeUnmount(() => clearInterval(timer))
 
+/** 점 옆에 항상 함께 표시하는 짧은 라벨 */
+const statusLabel = computed(
+  () =>
+    ({
+      checking: '서버 확인 중',
+      online: '서버 정상',
+      offline: '서버 연결 오류',
+    })[server.status.value],
+)
+
 const statusText = computed(
   () =>
     ({
@@ -64,10 +74,11 @@ function checkedAt(): string {
             전체 기능
           </NuxtLink>
         </nav>
-        <!-- 연계 서버 상태 — 클릭 시 즉시 재확인. 장애일 때만 텍스트도 노출 -->
+        <!-- 연계 서버 상태 — 점 + 라벨 상시 표시, 클릭 시 즉시 재확인 -->
         <button
           type="button"
-          class="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+          class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-primary/5"
+          :class="server.status.value === 'offline' ? 'text-destructive' : 'text-muted-foreground'"
           :title="statusText + checkedAt() + ' — 클릭하면 다시 확인합니다'"
           :aria-label="statusText"
           @click="server.check()"
@@ -80,9 +91,8 @@ function checkedAt(): string {
               'bg-destructive': server.status.value === 'offline',
             }"
           />
-          <span v-if="server.status.value === 'offline'" class="whitespace-nowrap text-destructive">
-            서버 연결 오류
-          </span>
+          <!-- aria-live: online↔offline 전환이 스크린리더에도 자동 안내되도록 -->
+          <span class="whitespace-nowrap" aria-live="polite">{{ statusLabel }}</span>
         </button>
       </div>
     </header>

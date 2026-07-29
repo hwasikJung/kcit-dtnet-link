@@ -17,6 +17,19 @@ export function serializeBulkHistory(records: BulkResultRecord[], exportedAt: nu
   return JSON.stringify(file)
 }
 
+/** 행 최소 형태 검증 — 필수 필드가 깨진 행이 섞인 레코드는 통째로 건너뛴다 */
+function isRow(v: unknown): boolean {
+  if (!v || typeof v !== 'object') return false
+  const r = v as Record<string, unknown>
+  return (
+    typeof r.seq === 'number' &&
+    typeof r.pk === 'string' &&
+    typeof r.status === 'string' &&
+    !!r.cols &&
+    typeof r.cols === 'object'
+  )
+}
+
 /** 레코드 최소 형태 검증 — 필수 필드가 깨진 레코드는 건너뛴다 */
 function isRecord(v: unknown): v is BulkResultRecord {
   if (!v || typeof v !== 'object') return false
@@ -26,7 +39,8 @@ function isRecord(v: unknown): v is BulkResultRecord {
     r.id.length > 0 &&
     typeof r.fileName === 'string' &&
     typeof r.createdAt === 'number' &&
-    Array.isArray(r.rows)
+    Array.isArray(r.rows) &&
+    r.rows.every(isRow)
   )
 }
 
@@ -47,6 +61,10 @@ export function parseBulkHistoryFile(text: string): {
   const file = data as Partial<HistoryFile>
   if (file?.kind !== FILE_KIND || !Array.isArray(file.records)) {
     throw new Error('이 모듈에서 내보낸 이력 파일이 아닙니다.')
+  }
+  // 상위 버전에서 내보낸 파일 — 스키마가 달라 잘못 읽힐 수 있으므로 거부한다
+  if (typeof file.version === 'number' && file.version > FILE_VERSION) {
+    throw new Error('상위 버전에서 내보낸 이력 파일입니다. 모듈을 업데이트한 뒤 가져와 주세요.')
   }
   const records = file.records.filter(isRecord)
   return { records, skipped: file.records.length - records.length }

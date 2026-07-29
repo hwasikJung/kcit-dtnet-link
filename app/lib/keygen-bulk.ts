@@ -63,10 +63,12 @@ export function flattenKeygenResult(
   const p = parseKeygenResponse(data)
   if (regions && regions.length > 1) {
     const list = regions.map((c) => `${c.si} ${c.sgg}`).join(', ')
+    const regionMsg = `같은 주소가 ${regions.length}개 지역에 있습니다(${list}) — 시·도부터 포함해 다시 입력해 주세요.`
     return {
       status: 'notfound',
       cols: { clean_addr: p.ok ? p.result.cleanAddr : p.cleanAddr },
-      errorMsg: `같은 주소가 ${regions.length}개 지역에 있습니다(${list}) — 시·도부터 포함해 다시 입력해 주세요.`,
+      // 매칭 자체가 실패했으면 실제 실패 사유를 먼저 보여준다(다지역 안내만으로는 오도 가능)
+      errorMsg: p.ok ? regionMsg : `${p.message} ${regionMsg}`,
     }
   }
   if (!p.ok) {

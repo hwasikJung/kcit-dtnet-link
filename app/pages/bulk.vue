@@ -94,6 +94,19 @@ const running = ref(false)
 const finished = ref(false)
 const progress = ref({ done: 0, total: 0 })
 
+/** 실행 시작 시각 — 진행 속도로 남은 시간을 추정한다 */
+const runStartedAt = ref(0)
+const etaText = computed(() => {
+  const { done, total } = progress.value
+  // 표본이 적으면(5건 미만) 추정이 크게 흔들려 표시하지 않는다
+  if (!running.value || !total || done < 5 || done >= total) return ''
+  const remainMs = ((performance.now() - runStartedAt.value) / done) * (total - done)
+  const sec = Math.round(remainMs / 1000)
+  if (sec < 5) return '곧 완료됩니다'
+  if (sec < 60) return `약 ${sec}초 남음`
+  return `약 ${Math.ceil(sec / 60)}분 남음`
+})
+
 const detailRow = ref<BulkRow | null>(null)
 const detailKind = ref<BulkMode>('keygen')
 const detailOpen = ref(false)
@@ -151,7 +164,8 @@ async function onFileChange(ev: Event) {
   const input = ev.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file) return
+  // 실행 중 새 파일을 적용하면 진행 중인 워커가 교체된 행 목록에 결과를 덮어써 데이터가 섞인다
+  if (running.value || !file) return
 
   const XLSX = await import('xlsx')
   let aoa: unknown[][]
@@ -260,6 +274,7 @@ async function executeLookups(keys: string[]) {
   running.value = true
   cancelRequested.value = false
   progress.value = { done: 0, total: keys.length }
+  runStartedAt.value = performance.now()
 
   async function lookup(key: string) {
     const result = await lookupOne(key)
@@ -269,12 +284,15 @@ async function executeLookups(keys: string[]) {
     progress.value.done++
   }
 
-  // 동시 CONCURRENCY건 워커 풀
+  // 동시 CONCURRENCY건 워커 풀 — 중단 검사를 큐에서 꺼내기 전에 해 꺼낸 키가 미처리로 버려지지 않게 한다
   const queue = [...keys]
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-      for (let key = queue.shift(); key != null && !cancelRequested.value; key = queue.shift())
+      while (!cancelRequested.value) {
+        const key = queue.shift()
+        if (key == null) break
         await lookup(key)
+      }
     }),
   )
 
@@ -294,7 +312,8 @@ async function saveRecord() {
     createdAt: Date.now(),
     total: rows.value.length,
     ...summary.value,
-    rows: JSON.parse(JSON.stringify(rows.value)),
+    // 반응형 프록시 제거 — JSON 왕복보다 가벼운 구조적 클론 사용(최대 5,000행 + 원본 응답 포함)
+    rows: structuredClone(toRaw(rows.value)),
     kind: mode.value,
     extraHeaders: [...extraHeaders.value],
   }
@@ -369,8 +388,14 @@ async function openHistory(meta: BulkHistoryMeta) {
 }
 
 async function removeHistory(meta: BulkHistoryMeta) {
-  await history.remove(meta.id)
-  toast('이력을 삭제했습니다.')
+  // 원본 응답까지 담긴 이력이라 복구할 수 없다 — 삭제 전 확인
+  if (!window.confirm(`'${meta.fileName}' 이력을 삭제할까요? 삭제하면 되돌릴 수 없습니다.`)) return
+  try {
+    await history.remove(meta.id)
+    toast('이력을 삭제했습니다.')
+  } catch {
+    toast('이력 삭제에 실패했습니다. (브라우저 저장소 확인)', 'error')
+  }
 }
 
 /** 이력 레코드의 처리 종류 — kind 없는 과거 레코드는 대장 정보 조회 */
@@ -418,19 +443,26 @@ async function onImportHistory(ev: Event) {
   const existing = new Set(history.items.value.map((i) => i.id))
   let added = 0
   let dup = 0
+  let saveFailed = false
   // 오래된 것부터 저장 — 보관 한도(최근 20건) 초과 시 최신 이력이 남도록
   for (const r of [...parsed.records].sort((a, b) => a.createdAt - b.createdAt)) {
     if (existing.has(r.id)) {
       dup++
       continue
     }
-    await history.save(r)
-    added++
+    try {
+      await history.save(r)
+      added++
+    } catch {
+      saveFailed = true
+      break
+    }
   }
   const parts = [`이력 ${added}건을 가져왔습니다.`]
   if (dup) parts.push(`이미 있는 ${dup}건 제외.`)
   if (parsed.skipped) parts.push(`형식 오류 ${parsed.skipped}건 제외.`)
-  toast(parts.join(' '))
+  if (saveFailed) parts.push('저장 실패로 중단했습니다. (브라우저 저장소 확인)')
+  toast(parts.join(' '), saveFailed ? 'error' : undefined)
 }
 
 function formatDate(ts: number) {
@@ -475,6 +507,7 @@ function formatDate(ts: number) {
         <label
           for="bulk-file"
           class="inline-flex h-9 cursor-pointer items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          :class="running ? 'pointer-events-none opacity-50' : ''"
         >
           엑셀 파일 선택
         </label>
@@ -484,6 +517,7 @@ function formatDate(ts: number) {
           accept=".xlsx,.xls,.csv"
           class="sr-only"
           aria-label="일괄처리용 엑셀 파일"
+          :disabled="running"
           @change="onFileChange"
         />
         <Button variant="outline" @click="downloadSample">샘플 파일 받기</Button>
@@ -560,15 +594,15 @@ function formatDate(ts: number) {
         </span>
       </div>
 
-      <!-- 진행률 바 -->
-      <div
-        v-if="running && progress.total"
-        class="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
-      >
-        <div
-          class="h-full rounded-full bg-primary transition-all"
-          :style="{ width: `${Math.round((progress.done / progress.total) * 100)}%` }"
-        />
+      <!-- 진행률 바 + 남은 시간 추정 -->
+      <div v-if="running && progress.total" class="mt-3">
+        <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            class="h-full rounded-full bg-primary transition-all"
+            :style="{ width: `${Math.round((progress.done / progress.total) * 100)}%` }"
+          />
+        </div>
+        <p v-if="etaText" class="mt-1 text-right text-xs text-muted-foreground">{{ etaText }}</p>
       </div>
     </section>
 
@@ -654,9 +688,14 @@ function formatDate(ts: number) {
           <Badge class="border-transparent bg-destructive text-white text-[11px]"
             >실패 {{ item.error }}</Badge
           >
-          <Button variant="ghost" size="sm" class="shrink-0" @click.stop="removeHistory(item)"
-            >삭제</Button
+          <Button
+            variant="ghost"
+            size="sm"
+            class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            @click.stop="removeHistory(item)"
           >
+            삭제
+          </Button>
         </li>
       </ul>
     </section>

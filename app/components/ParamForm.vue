@@ -70,7 +70,7 @@ function onFileChange(ev: Event) {
       <div v-for="p in endpoint.params" :key="p.name">
         <label class="mb-1.5 block text-xs font-medium text-foreground">
           {{ p.name }}
-          <span v-if="p.required" class="text-red-700">*</span>
+          <span v-if="p.required" class="text-destructive">*</span>
           <span v-if="p.description" class="ml-1 font-normal text-muted-foreground">
             — {{ p.description }}
           </span>
@@ -90,7 +90,7 @@ function onFileChange(ev: Event) {
 
       <div v-if="isMultipart">
         <label for="tta-csv-file" class="mb-1.5 block text-xs font-medium">
-          CSV 파일 <span class="text-red-700">*</span>
+          CSV 파일 <span class="text-destructive">*</span>
           <span class="ml-1 font-normal text-muted-foreground">
             — EUC-KR 인코딩, 컬럼: place_code, place_name, input_addr
           </span>
@@ -113,7 +113,7 @@ function onFileChange(ev: Event) {
       {{ loading ? '호출 중…' : '실행' }}
     </Button>
     <p v-if="!loading && !canRun" class="text-center text-xs text-muted-foreground">
-      필수 항목(<span class="text-red-700">*</span>)을 모두 입력하면 실행할 수 있습니다.
+      필수 항목(<span class="text-destructive">*</span>)을 모두 입력하면 실행할 수 있습니다.
     </p>
   </div>
 </template>

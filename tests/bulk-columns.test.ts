@@ -18,6 +18,11 @@ describe('flattenBldInfo', () => {
     expect(cols.totarea).toBe('12,345.68')
   })
 
+  it('이미 콤마가 포함된 숫자 문자열도 재포맷한다', () => {
+    const cols = flattenBldInfo({ title_info: [{ totarea: '12,345.678' }] })
+    expect(cols.totarea).toBe('12,345.68')
+  })
+
   it('date 포맷은 YYYYMMDD를 YYYY-MM-DD로 변환한다', () => {
     const cols = flattenBldInfo({ title_info: [{ useapr_day: '20201231' }] })
     expect(cols.useapr_day).toBe('2020-12-31')

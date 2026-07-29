@@ -95,6 +95,17 @@ describe('flattenKeygenResult', () => {
     expect(r.errorMsg).toContain('경기도 하남시')
   })
 
+  it('매칭 실패 + 다지역이면 실제 실패 사유와 다지역 안내를 함께 보여준다', () => {
+    const regions = [
+      { si: '부산광역시', sgg: '중구', roadAddr: '', bldNm: '' },
+      { si: '경기도', sgg: '하남시', roadAddr: '', bldNm: '' },
+    ]
+    const r = flattenKeygenResult({ error: 'cannot match address', clean_addr: '대청로' }, regions)
+    expect(r.status).toBe('notfound')
+    expect(r.errorMsg).toContain('찾지 못했습니다')
+    expect(r.errorMsg).toContain('2개 지역')
+  })
+
   it('지역 후보가 1곳 이하이면 기존과 동일하게 처리한다', () => {
     const one = [{ si: '경기도', sgg: '의정부시', roadAddr: '', bldNm: '' }]
     const r = flattenKeygenResult(

@@ -55,6 +55,11 @@ const STEP_DELAY = 450
 const { toast } = useToast()
 const history = useKeygenHistory()
 
+/** 최근 생성 이력 전체 삭제 — 실수 방지를 위해 확인을 받는다 */
+function clearHistory() {
+  if (window.confirm('최근 생성 이력을 모두 삭제할까요?')) history.clear()
+}
+
 const addr = ref('')
 /** 마지막 생성에 실제 사용한 주소 — 결과 카드의 연계 링크·요약이 입력창 수정에 흔들리지 않게 고정한다 */
 const lastAddr = ref('')
@@ -208,6 +213,9 @@ const suggestActive = ref(-1)
 let suggestTimer: ReturnType<typeof setTimeout> | undefined
 // 입력이 이어지면 이전 호출 결과를 무시하는 실행 토큰
 let suggestRunId = 0
+
+// 디바운스 대기 중 페이지를 벗어나면 예약된 자동완성 호출을 취소한다
+onBeforeUnmount(() => clearTimeout(suggestTimer))
 
 function closeSuggest() {
   clearTimeout(suggestTimer)
@@ -689,7 +697,13 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             <p v-else class="text-xs font-medium text-muted-foreground">
               총괄표제부 PK {{ upperPks.length }}건
             </p>
-            <span v-if="dongLoading" class="text-xs text-muted-foreground">
+            <span
+              v-if="dongLoading"
+              class="flex items-center gap-1.5 text-xs text-muted-foreground"
+            >
+              <span
+                class="size-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+              />
               동 정보 불러오는 중…
             </span>
           </div>
@@ -743,13 +757,23 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                   </span>
                 </span>
               </button>
-              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(g.upperPk)">
+              <Button variant="ghost" size="sm" class="h-9 text-xs md:h-7" @click="copy(g.upperPk)">
                 복사
               </Button>
-              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openInfo(g.upperPk)">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-9 text-xs md:h-7"
+                @click="openInfo(g.upperPk)"
+              >
                 대장 정보
               </Button>
-              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openConvert(g.upperPk)">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-9 text-xs md:h-7"
+                @click="openConvert(g.upperPk)"
+              >
                 신규 PK 전환
               </Button>
             </div>
@@ -774,10 +798,15 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                       {{ dongText(pk) }}
                     </span>
                   </span>
-                  <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)">
+                  <Button variant="ghost" size="sm" class="h-9 text-xs md:h-7" @click="copy(pk)">
                     복사
                   </Button>
-                  <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openInfo(pk)">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-9 text-xs md:h-7"
+                    @click="openInfo(pk)"
+                  >
                     대장 정보
                   </Button>
                 </li>
@@ -816,10 +845,15 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                         {{ dongText(pk) }}
                       </span>
                     </span>
-                    <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copy(pk)"
+                    <Button variant="ghost" size="sm" class="h-9 text-xs md:h-7" @click="copy(pk)"
                       >복사</Button
                     >
-                    <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openInfo(pk)">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-9 text-xs md:h-7"
+                      @click="openInfo(pk)"
+                    >
                       대장 정보
                     </Button>
                   </li>
@@ -958,14 +992,30 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
       <!-- 실패: 매칭 실패 / 연결 오류 -->
       <div
         v-else-if="(parsed && !parsed.ok) || networkError"
+        role="alert"
         class="mt-5 rounded-xl border border-destructive/30 bg-card p-5 shadow-sm"
       >
         <p class="text-sm font-semibold text-destructive">
           {{ networkError ? '서버에 연결하지 못했습니다' : '표준연계키를 생성하지 못했습니다' }}
         </p>
         <p class="mt-1.5 text-sm text-muted-foreground">
-          {{ networkError || (parsed && !parsed.ok ? parsed.message : '') }}
+          {{
+            networkError
+              ? '네트워크 상태를 확인한 뒤 다시 시도해 주세요. 문제가 계속되면 헤더의 서버 상태 표시를 확인해 주세요.'
+              : parsed && !parsed.ok
+                ? parsed.message
+                : ''
+          }}
         </p>
+        <!-- 기술적 오류 원문은 접어서 제공 — 화면 기본 문구는 평이한 안내로 통일 -->
+        <details v-if="networkError" class="mt-2">
+          <summary class="cursor-pointer text-xs text-muted-foreground select-none">
+            오류 원문 보기
+          </summary>
+          <p class="mt-1 rounded-md bg-secondary px-3 py-2 font-mono text-xs break-all">
+            {{ networkError }}
+          </p>
+        </details>
         <p
           v-if="parsed && !parsed.ok && parsed.cleanAddr"
           class="mt-2 rounded-md bg-secondary px-3 py-2 text-sm"
@@ -982,7 +1032,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
           <Button
             variant="outline"
             size="sm"
-            class="h-7 text-xs"
+            class="h-9 text-xs md:h-7"
             @click="retrySimilar(parsed.similarAddr)"
           >
             이 주소로 다시 시도
@@ -1020,7 +1070,12 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
     <section v-if="history.items.value.length" class="mt-10" aria-label="최근 생성 이력">
       <div class="flex items-center justify-between">
         <h2 class="text-xs font-semibold text-muted-foreground">최근 생성</h2>
-        <Button variant="ghost" size="sm" class="h-7 text-xs" @click="history.clear()">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-9 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive md:h-7"
+          @click="clearHistory()"
+        >
           전체 삭제
         </Button>
       </div>

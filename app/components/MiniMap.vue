@@ -13,6 +13,7 @@ const props = defineProps<{
 const el = ref<HTMLElement | null>(null)
 const failed = ref(false)
 let map: LeafletMap | null = null
+let resizeObserver: ResizeObserver | null = null
 
 const kakaoUrl = computed(
   () =>
@@ -28,6 +29,10 @@ onMounted(async () => {
     ])
     if (!el.value) return
     map = L.map(el.value, { scrollWheelZoom: false }).setView([props.lat, props.lng], 17)
+    // 페이지 스크롤을 가로채지 않도록 평소에는 휠 줌을 꺼 두고,
+    // 지도를 클릭하면 휠 줌 활성화 → 마우스가 지도 밖으로 나가면 다시 비활성화
+    map.on('click', () => map?.scrollWheelZoom.enable())
+    map.on('mouseout', () => map?.scrollWheelZoom.disable())
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -44,12 +49,17 @@ onMounted(async () => {
       fillColor: '#b85c00',
       fillOpacity: 0.35,
     }).addTo(map)
+    // 컨테이너 크기가 나중에 확정되면(레이아웃 변화·창 리사이즈) 타일이 회색으로 깨지는 것을 방지
+    resizeObserver = new ResizeObserver(() => map?.invalidateSize())
+    resizeObserver.observe(el.value)
   } catch {
     failed.value = true
   }
 })
 
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
   map?.remove()
   map = null
 })
@@ -59,6 +69,13 @@ onBeforeUnmount(() => {
   <!-- isolate: Leaflet 내부 z-index(컨트롤 1000 등)가 카드 밖(모달 오버레이 z-50)을 뚫지 않게 격리 -->
   <div class="relative isolate z-0 h-60 overflow-hidden rounded-lg border">
     <div ref="el" class="h-full w-full" />
+    <!-- 휠 줌은 지도 클릭 후 활성화 — 조작법 힌트 -->
+    <div
+      v-if="!failed"
+      class="pointer-events-none absolute top-2 right-2 z-[500] rounded bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground"
+    >
+      클릭 후 스크롤로 확대/축소
+    </div>
     <div
       v-if="failed"
       class="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-1.5 bg-muted/95 p-4 text-center text-xs text-muted-foreground"

@@ -24,7 +24,11 @@ function txRequest<T>(
   return openDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const req = fn(db.transaction(STORE, mode).objectStore(STORE))
+        const tx = db.transaction(STORE, mode)
+        // 트랜잭션 종료 시 커넥션을 닫는다 — 추후 DB 버전 업그레이드 시 blocked 방지
+        tx.oncomplete = () => db.close()
+        tx.onabort = () => db.close()
+        const req = fn(tx.objectStore(STORE))
         req.onsuccess = () => resolve(req.result)
         req.onerror = () => reject(req.error)
       }),
@@ -36,10 +40,15 @@ export function useBulkHistory() {
 
   async function refresh() {
     if (!import.meta.client) return
-    const all = await txRequest<BulkResultRecord[]>((s) => s.getAll(), 'readonly')
-    items.value = all
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map(({ rows: _rows, ...meta }) => meta)
+    try {
+      const all = await txRequest<BulkResultRecord[]>((s) => s.getAll(), 'readonly')
+      items.value = all
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map(({ rows: _rows, ...meta }) => meta)
+    } catch (e) {
+      // IndexedDB 차단(프라이빗 모드 등)·손상 시 이력만 비운 채 앱 동작은 유지
+      console.warn('일괄 이력 조회 실패:', e)
+    }
   }
 
   async function save(record: BulkResultRecord) {
@@ -52,8 +61,14 @@ export function useBulkHistory() {
     await refresh()
   }
 
-  function get(id: string): Promise<BulkResultRecord | undefined> {
-    return txRequest<BulkResultRecord | undefined>((s) => s.get(id), 'readonly')
+  async function get(id: string): Promise<BulkResultRecord | undefined> {
+    try {
+      return await txRequest<BulkResultRecord | undefined>((s) => s.get(id), 'readonly')
+    } catch (e) {
+      // 호출부는 undefined를 "불러오지 못함"으로 안내한다
+      console.warn('일괄 이력 조회 실패:', e)
+      return undefined
+    }
   }
 
   async function remove(id: string) {

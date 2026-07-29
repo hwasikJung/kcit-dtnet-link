@@ -47,4 +47,27 @@ describe('serializeBulkHistory / parseBulkHistoryFile', () => {
     expect(records).toEqual([RECORD])
     expect(skipped).toBe(3)
   })
+
+  it('깨진 행이 섞인 레코드는 통째로 건너뛴다', () => {
+    const broken = { ...RECORD, id: 'r2', rows: [{ seq: 1 }] }
+    const text = JSON.stringify({
+      kind: 'dtent-link/bulk-history',
+      version: 1,
+      exportedAt: 0,
+      records: [RECORD, broken],
+    })
+    const { records, skipped } = parseBulkHistoryFile(text)
+    expect(records).toEqual([RECORD])
+    expect(skipped).toBe(1)
+  })
+
+  it('상위 버전에서 내보낸 파일은 거부한다', () => {
+    const text = JSON.stringify({
+      kind: 'dtent-link/bulk-history',
+      version: 2,
+      exportedAt: 0,
+      records: [RECORD],
+    })
+    expect(() => parseBulkHistoryFile(text)).toThrow('상위 버전')
+  })
 })

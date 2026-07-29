@@ -31,7 +31,8 @@ function formatValue(v: unknown, format?: BulkColumn['format']): string {
   const s = String(v).trim()
   if (!s) return ''
   if (format === 'number') {
-    const n = Number(s)
+    // 서버가 이미 천 단위 콤마를 넣어 보내는 경우도 재포맷한다
+    const n = Number(s.replace(/,/g, ''))
     if (Number.isNaN(n)) return s
     return n.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
   }

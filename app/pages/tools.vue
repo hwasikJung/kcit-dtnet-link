@@ -15,6 +15,11 @@ import type { CallHistoryItem } from '~/composables/useCallHistory'
 const { endpoints, tagOrder } = useApiSpec()
 const callHistory = useCallHistory()
 
+/** 호출 이력 전체 삭제 — 실수 방지를 위해 확인을 받는다 */
+function clearCallHistory() {
+  if (window.confirm('호출 이력을 모두 삭제할까요?')) callHistory.clear()
+}
+
 const selected = ref<ApiEndpoint | null>(null)
 const loading = ref(false)
 const result = ref<RunResult | null>(null)
@@ -32,11 +37,17 @@ onMounted(() => {
   callHistory.refresh()
   const path = route.query.path
   if (typeof path !== 'string') return
-  const e = endpoints.find((x) => x.path === path)
+  // 같은 경로에 메서드가 다른 기능이 공존할 수 있으므로 ?method= 가 있으면 함께 매칭한다
+  const method = route.query.method
+  const e = endpoints.find(
+    (x) =>
+      x.path === path &&
+      (typeof method !== 'string' || x.method.toLowerCase() === method.toLowerCase()),
+  )
   if (!e) return
   const values: Record<string, string | boolean> = {}
   for (const [k, v] of Object.entries(route.query)) {
-    if (k !== 'path' && k !== 'run' && typeof v === 'string') values[k] = v
+    if (k !== 'path' && k !== 'method' && k !== 'run' && typeof v === 'string') values[k] = v
   }
   selected.value = e
   restoreValues.value = values
@@ -49,7 +60,17 @@ onMounted(() => {
   if (route.query.run === '1' && !isMultipart && requiredFilled) run(values, null)
 })
 
+// 실행 무효화 토큰 — 다른 기능 선택 뒤 늦게 도착한 이전 응답이 결과 패널을 덮어쓰지 않게 한다
+let runSeq = 0
+
+/** 진행 중인 실행을 무효화 — 응답이 와도 화면을 갱신하지 않는다(호출 이력에는 기록) */
+function invalidateRun() {
+  runSeq++
+  loading.value = false
+}
+
 function select(e: ApiEndpoint) {
+  invalidateRun()
   selected.value = e
   restoreValues.value = null
   result.value = null
@@ -58,6 +79,7 @@ function select(e: ApiEndpoint) {
 function restore(item: CallHistoryItem) {
   const e = endpoints.find((x) => x.method === item.method && x.path === item.path)
   if (!e) return
+  invalidateRun()
   selected.value = e
   restoreValues.value = { ...item.values }
   formKey.value++
@@ -100,8 +122,10 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
   }
 
   const url = useRuntimeConfig().public.apiBase + path
+  const seq = ++runSeq
   loading.value = true
   const started = performance.now()
+  let outcome: RunResult
   try {
     let body: FormData | undefined
     if (file) {
@@ -109,7 +133,7 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
       body.append('csvfile', file)
     }
     const res = await $fetch.raw(url, { method: e.method as 'GET' | 'POST', query, body })
-    result.value = {
+    outcome = {
       status: res.status,
       elapsedMs: Math.round(performance.now() - started),
       data: res._data,
@@ -118,33 +142,35 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
     }
   } catch (err) {
     const er = err as { statusCode?: number; data?: { message?: string } | null; message?: string }
-    result.value = {
+    outcome = {
       status: er?.statusCode ?? null,
       elapsedMs: Math.round(performance.now() - started),
       data: er?.data ?? null,
       errorMsg: er?.data?.message ?? er?.message ?? '알 수 없는 오류',
       url: path,
     }
-  } finally {
+  }
+
+  // 응답 대기 중 다른 기능을 선택·실행했다면 화면은 갱신하지 않는다
+  if (seq === runSeq) {
+    result.value = outcome
     loading.value = false
+
+    // 태블릿·모바일(상하 스택)에서는 결과가 화면 밖에 있으므로 결과 영역으로 스크롤
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      await nextTick()
+      resultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
   }
 
-  // 태블릿·모바일(상하 스택)에서는 결과가 화면 밖에 있으므로 결과 영역으로 스크롤
-  if (window.matchMedia('(max-width: 1023px)').matches) {
-    await nextTick()
-    resultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  if (result.value) {
-    callHistory.add({
-      method: e.method,
-      path: e.path,
-      summary: e.summary,
-      values: { ...values },
-      status: result.value.status,
-      elapsedMs: result.value.elapsedMs,
-    })
-  }
+  callHistory.add({
+    method: e.method,
+    path: e.path,
+    summary: e.summary,
+    values: { ...values },
+    status: outcome.status,
+    elapsedMs: outcome.elapsedMs,
+  })
 }
 </script>
 
@@ -208,7 +234,14 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
         </p>
         <template v-else>
           <div class="flex justify-end">
-            <Button variant="ghost" size="sm" @click="callHistory.clear()">전체 삭제</Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              @click="clearCallHistory()"
+            >
+              전체 삭제
+            </Button>
           </div>
           <ul class="divide-y rounded-lg border">
             <li
@@ -246,7 +279,7 @@ async function run(values: Record<string, string | boolean>, file: File | null) 
               <Button
                 variant="ghost"
                 size="sm"
-                class="shrink-0"
+                class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
                 @click.stop="callHistory.remove(item.id)"
               >
                 삭제

@@ -56,7 +56,26 @@ const STATUS_LABEL = computed<Record<BulkRow['status'], string>>(() => ({
       </DialogHeader>
 
       <template v-if="row">
-        <p v-if="row.errorMsg" class="text-sm text-destructive">{{ row.errorMsg }}</p>
+        <!-- 처리 실패(status=error)의 원문 오류는 기술 문자열일 수 있어 접어서 제공.
+             입력 오류(invalid)·미존재 안내는 우리가 만든 평이한 문구라 그대로 노출 -->
+        <template v-if="row.errorMsg">
+          <p v-if="row.status !== 'error' || row.invalid" class="text-sm text-destructive">
+            {{ row.errorMsg }}
+          </p>
+          <div v-else>
+            <p class="text-sm text-destructive">
+              처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.
+            </p>
+            <details class="mt-1">
+              <summary class="cursor-pointer text-xs text-muted-foreground select-none">
+                오류 원문 보기
+              </summary>
+              <p class="mt-1 rounded-md bg-secondary px-3 py-2 font-mono text-xs break-all">
+                {{ row.errorMsg }}
+              </p>
+            </details>
+          </div>
+        </template>
 
         <div v-if="row.status === 'success'" class="overflow-hidden rounded-lg border">
           <table class="w-full text-sm">
