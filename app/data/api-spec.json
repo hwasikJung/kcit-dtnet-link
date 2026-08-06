@@ -1,6 +1,6 @@
 {
   "source": "http://220.76.251.227:9930/api-docs/swagger-ui-init.js",
-  "extractedAt": "2026-07-20T01:29:35.418Z",
+  "extractedAt": "2026-08-06T01:14:39.632Z",
   "info": {
     "title": "SQI Soft Address API",
     "version": "1.0.0"
@@ -15,9 +15,10 @@
     "건물매칭",
     "에너지매칭",
     "TTA",
-    "PK변환"
+    "PK변환",
+    "표준연계키"
   ],
-  "endpointCount": 26,
+  "endpointCount": 27,
   "endpoints": [
     {
       "tag": "외부API제공",
@@ -669,6 +670,53 @@
           "required": true,
           "type": "string",
           "description": "신규 건축물대장 PK"
+        }
+      ],
+      "body": null
+    },
+    {
+      "tag": "표준연계키",
+      "method": "GET",
+      "path": "/sqiapi/addr/std_link_key",
+      "summary": "표준연계키(tb_std_link_key) 조회",
+      "rawSummary": "표준연계키(tb_std_link_key) 조회",
+      "description": "조건 중 최소 1개 필수. 결과는 최대 10,000건까지 반환한다.",
+      "statusFlag": null,
+      "params": [
+        {
+          "name": "std_link_key",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "description": "표준연계키 (예: R_11110-1)"
+        },
+        {
+          "name": "mgm_bld_pk",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "description": "관리건축물대장 PK (예: 11110-1)"
+        },
+        {
+          "name": "mgm_bld_pk_new",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "description": "신규 건축물대장 PK"
+        },
+        {
+          "name": "pnu",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "description": "필지고유번호(PNU 19자리)"
+        },
+        {
+          "name": "sigungu_cd",
+          "in": "query",
+          "required": false,
+          "type": "string",
+          "description": "시군구코드 (예: 11110)"
         }
       ],
       "body": null

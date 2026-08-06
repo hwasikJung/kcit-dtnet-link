@@ -1,8 +1,8 @@
 // 메뉴2(엑셀 일괄 조회) 업로드 시트 파싱 — 헤더 자동 감지 + 행별 유효성(빈값/중복) 판정
 import type { BulkRow } from '~/types/bulk'
 
-/** mgmBldPk 형식(숫자와 하이픈). 1행 A열이 이 형식이 아니면 헤더로 간주한다 */
-export const PK_PATTERN = /^[\d-]+$/
+/** PK/표준연계키 형식(숫자·하이픈, R_/T_ 접두 허용). 1행 A열이 이 형식이 아니면 헤더로 간주한다 */
+export const PK_PATTERN = /^([RT]_)?[\d-]+$/i
 
 /** 열 인덱스(0=A) → 엑셀 열 문자(A~Z, AA~) — 헤더 없는 업로드의 원본 컬럼명 대체에 사용 */
 export function colLetter(index: number): string {

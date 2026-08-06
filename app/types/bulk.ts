@@ -26,7 +26,7 @@ export interface BulkResultRecord {
   notfound: number
   error: number
   rows: BulkRow[]
-  /** 처리 종류 — 'keygen'=주소→키 일괄 생성, 없으면 기존 대장 정보 조회('info') */
+  /** 처리 종류 — 'keygen'=주소→키 일괄 생성, 'info'=PK→표준연계키 조회(없는 과거 레코드 포함) */
   kind?: 'info' | 'keygen'
   /** 업로드 원본 B열~ 헤더 — rows[].extra와 짝. 없는 과거 레코드는 원본 컬럼 없음 */
   extraHeaders?: string[]

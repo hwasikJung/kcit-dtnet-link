@@ -8,11 +8,11 @@ import {
   DialogScrollContent,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { BULK_COLUMNS, flattenBldInfo } from '~/lib/bulk-columns'
 import { parseBulkSheet, pasteToAoa } from '~/lib/bulk-parse'
 import { parseBulkHistoryFile, serializeBulkHistory } from '~/lib/history-io'
 import { extractRegionCandidates, type RegionCandidate } from '~/lib/keygen'
 import { KEYGEN_COLUMNS, flattenKeygenResult, parseAddrSheet } from '~/lib/keygen-bulk'
+import { STD_LINK_COLUMNS, detectStdLinkParam, flattenStdLinkKey } from '~/lib/std-link-key'
 import type { BulkHistoryMeta, BulkResultRecord, BulkRow } from '~/types/bulk'
 
 const MAX_ROWS = 5000
@@ -40,6 +40,21 @@ const MODES: Record<
     apiPaths: string[]
   }
 > = {
+  info: {
+    tab: 'PK기반 일괄처리',
+    desc: '생성된 키를 활용하는 단계입니다. 엑셀 A열에 표준연계키(R_/T_ 접두) 또는 건축물대장 PK(기존·신규)를 담아 업로드하면 표준연계키와 대장 PK·건물명·주소·PNU 등 연계 정보를 일괄 조회합니다.',
+    keyLabel: '표준연계키',
+    hint: 'A열 = 표준연계키 또는 대장 PK',
+    runLabel: '일괄 조회',
+    columns: STD_LINK_COLUMNS,
+    statusLabels: { notfound: '미매칭' },
+    detailDesc: '표준연계키 조회 상세',
+    sample: [['표준연계키'], ['11680-12777'], ['1024112777'], ['R_11110-1']],
+    sampleName: 'PK기반일괄조회_샘플.xlsx',
+    downloadSuffix: '_조회결과.xlsx',
+    parse: parseBulkSheet,
+    apiPaths: ['/sqiapi/addr/std_link_key'],
+  },
   keygen: {
     tab: '주소기반 일괄처리',
     desc: '건물 주소로 표준연계키를 만드는 단계입니다. 엑셀 A열에 주소를 담아 업로드하면 주소 정제·건축물대장 매칭을 거쳐 표준연계키를 일괄 생성합니다.',
@@ -60,29 +75,18 @@ const MODES: Record<
     sampleName: '주소기반일괄생성_샘플.xlsx',
     downloadSuffix: '_키생성결과.xlsx',
     parse: parseAddrSheet,
-    apiPaths: ['/sqiapi/addr/building_match_clean_union', '/sqiapi/addr/asis/juso'],
-  },
-  info: {
-    tab: 'PK기반 일괄처리',
-    desc: '생성된 표준연계키를 활용하는 단계입니다. 엑셀 A열에 표준연계키(mgmBldPk)를 담아 업로드하면 키에 연결된 건물명·주소·용도·구조·연면적·층수 등 건축물대장 정보를 일괄 조회합니다.',
-    keyLabel: '표준연계키',
-    hint: 'A열 = 표준연계키(mgmBldPk)',
-    runLabel: '일괄 조회',
-    columns: BULK_COLUMNS,
-    statusLabels: {},
-    detailDesc: '표준연계키로 조회한 건물 정보 상세',
-    sample: [['표준연계키'], ['11680-12777'], ['11680-12778']],
-    sampleName: 'PK기반일괄조회_샘플.xlsx',
-    downloadSuffix: '_조회결과.xlsx',
-    parse: parseBulkSheet,
-    apiPaths: ['/sqiapi/addr/mgm_bld_pk_info/{mgmbldpk}'],
+    apiPaths: [
+      '/sqiapi/addr/building_match_clean_union',
+      '/sqiapi/addr/asis/juso',
+      '/sqiapi/addr/std_link_key',
+    ],
   },
 }
 
 const { toast } = useToast()
 const history = useBulkHistory()
 
-const mode = ref<BulkMode>('keygen')
+const mode = ref<BulkMode>('info')
 const cfg = computed(() => MODES[mode.value])
 
 const fileName = ref('')
@@ -244,18 +248,27 @@ async function lookupOne(
           () => [] as RegionCandidate[],
         ),
       ])
-      return { raw, ...flattenKeygenResult(raw, regions) }
-    }
-    const raw = await $fetch(apiBase + '/sqiapi/addr/mgm_bld_pk_info/' + encodeURIComponent(key))
-    if (raw && typeof raw === 'object' && 'error' in raw) {
-      return {
-        raw,
-        status: 'notfound',
-        cols: {},
-        errorMsg: '해당 PK로 건물 정보를 찾지 못했습니다.',
+      const flat = flattenKeygenResult(raw, regions)
+      // 매칭 응답에 총괄표제부 PK가 비어 있으면 std_link_key에서 소속 총괄(mgm_upper_bld_pk)을
+      // 찾아 채운다 — 실패 시 보강만 생략(fail-open). 같은 행의 표제부들은 같은 대지라 첫 PK만 조회
+      if (flat.status === 'success' && !flat.cols.upper_pk && flat.cols.pks) {
+        const firstPk = flat.cols.pks.split(',')[0]!.trim()
+        const upper = await $fetch(apiBase + '/sqiapi/addr/std_link_key', {
+          query: { mgm_bld_pk: firstPk },
+          timeout: 5000,
+        }).then(
+          (d) => flattenStdLinkKey(d).cols.mgm_upper_bld_pk ?? '',
+          () => '',
+        )
+        if (upper) flat.cols.upper_pk = upper
       }
+      return { raw, ...flat }
     }
-    return { raw, status: 'success', cols: flattenBldInfo(raw) }
+    // 입력 형식(표준연계키/기존 PK/신규 PK)에 맞는 쿼리 파라미터로 조회한다
+    const raw = await $fetch(apiBase + '/sqiapi/addr/std_link_key', {
+      query: { [detectStdLinkParam(key)]: key },
+    })
+    return { raw, ...flattenStdLinkKey(raw) }
   } catch (err) {
     const er = err as { data?: { message?: string } | null; message?: string }
     return {

@@ -1,4 +1,5 @@
-// 메뉴2(엑셀 일괄 조회) 결과 컬럼 매핑표 — B열부터의 표시 컬럼·순서·한글명을 이 모듈에서만 관리한다.
+// 메뉴1 대장 정보 모달(BldInfoDialog)의 표시 컬럼 매핑표 — 컬럼·순서·한글명을 이 모듈에서만 관리한다.
+// (메뉴2 PK기반 일괄처리는 std_link_key API로 전환되어 lib/std-link-key.ts를 쓴다)
 // 응답 출처: GET /sqiapi/addr/mgm_bld_pk_info/{mgmbldpk}
 //   basic  → 응답 basic_info (객체)
 //   title  → 응답 title_info[0] (표제부 배열의 첫 항목)

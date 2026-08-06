@@ -30,9 +30,11 @@ describe('pasteToAoa', () => {
 })
 
 describe('PK_PATTERN', () => {
-  it('숫자·하이픈 조합만 PK로 인정한다', () => {
+  it('숫자·하이픈 조합(R_/T_ 접두 허용)만 PK로 인정한다', () => {
     expect(PK_PATTERN.test('11680-12777')).toBe(true)
     expect(PK_PATTERN.test('12345')).toBe(true)
+    expect(PK_PATTERN.test('R_11110-1')).toBe(true)
+    expect(PK_PATTERN.test('t_11680-12777')).toBe(true)
     expect(PK_PATTERN.test('mgmBldPk')).toBe(false)
     expect(PK_PATTERN.test('건축물대장 PK')).toBe(false)
     expect(PK_PATTERN.test('')).toBe(false)

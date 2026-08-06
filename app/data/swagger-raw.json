@@ -1065,6 +1065,130 @@
           }
         }
       }
+    },
+    "/sqiapi/addr/std_link_key": {
+      "get": {
+        "summary": "표준연계키(tb_std_link_key) 조회",
+        "description": "조건 중 최소 1개 필수. 결과는 최대 10,000건까지 반환한다.",
+        "tags": [
+          "표준연계키"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "std_link_key",
+            "required": false,
+            "description": "표준연계키 (예: R_11110-1)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mgm_bld_pk",
+            "required": false,
+            "description": "관리건축물대장 PK (예: 11110-1)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mgm_bld_pk_new",
+            "required": false,
+            "description": "신규 건축물대장 PK",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pnu",
+            "required": false,
+            "description": "필지고유번호(PNU 19자리)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sigungu_cd",
+            "required": false,
+            "description": "시군구코드 (예: 11110)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "표준연계키 목록 (조건 미충족/미매칭 시 {\"error\":\"...\"} 반환)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "std_link_key": {
+                        "type": "string"
+                      },
+                      "recap_cnt": {
+                        "type": "integer"
+                      },
+                      "title_cnt": {
+                        "type": "integer"
+                      },
+                      "mgm_bld_pk": {
+                        "type": "string"
+                      },
+                      "mgm_bld_pk_new": {
+                        "type": "string"
+                      },
+                      "regstr_kind_gb": {
+                        "type": "string"
+                      },
+                      "mgm_upper_bld_pk": {
+                        "type": "string"
+                      },
+                      "bld_nm": {
+                        "type": "string"
+                      },
+                      "dong_nm": {
+                        "type": "string"
+                      },
+                      "plat_addr": {
+                        "type": "string"
+                      },
+                      "road_plat_addr": {
+                        "type": "string"
+                      },
+                      "pnu": {
+                        "type": "string"
+                      },
+                      "na_road_cd": {
+                        "type": "string"
+                      },
+                      "na_grnd_ugrnd_cd": {
+                        "type": "string"
+                      },
+                      "na_main_bun": {
+                        "type": "number"
+                      },
+                      "na_sub_bun": {
+                        "type": "number"
+                      },
+                      "sigungu_cd": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {}
