@@ -23,6 +23,12 @@ describe('serializeBulkHistory / parseBulkHistoryFile', () => {
     expect(skipped).toBe(0)
   })
 
+  it('이력 이름(label)도 내보내기/가져오기에서 보존된다', () => {
+    const labeled: BulkResultRecord = { ...RECORD, label: '3월분 시설물' }
+    const { records } = parseBulkHistoryFile(serializeBulkHistory([labeled], 0))
+    expect(records[0]?.label).toBe('3월분 시설물')
+  })
+
   it('JSON이 아니면 오류', () => {
     expect(() => parseBulkHistoryFile('not json')).toThrow('JSON 파일이 아닙니다.')
   })

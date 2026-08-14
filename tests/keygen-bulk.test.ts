@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { ADDR_HEADER_PATTERN, flattenKeygenResult, parseAddrSheet } from '~/lib/keygen-bulk'
+import {
+  ADDR_HEADER_PATTERN,
+  KEYGEN_COLUMNS,
+  STD_LINK_MERGE_KEYS,
+  flattenKeygenResult,
+  mergeStdLinkCols,
+  parseAddrSheet,
+} from '~/lib/keygen-bulk'
 
 describe('ADDR_HEADER_PATTERN', () => {
   it('주소 표제만 헤더로 인정한다', () => {
@@ -116,5 +123,45 @@ describe('flattenKeygenResult', () => {
     expect(flattenKeygenResult({ match_mgm_bld_pks: '41150-1', clean_addr: 'x' }, []).status).toBe(
       'success',
     )
+  })
+})
+
+describe('mergeStdLinkCols', () => {
+  const STD = {
+    std_link_key: 'S_11410_R_11410-261',
+    regstr_kind: '총괄표제부',
+    mgm_bld_pk: '11410-261',
+    mgm_bld_pk_new: '10141261',
+    bld_nm: '홍은동벽산아파트',
+    plat_addr: '서울특별시 서대문구 홍은동 455번지',
+    road_plat_addr: '서울특별시 서대문구 세검정로1길 95',
+    pnu: '1141011800104550000',
+    mgm_upper_bld_pk: '',
+  }
+
+  it('표준연계키 조회 컬럼을 병합하고 기존 PK·소속 총괄 PK는 병합하지 않는다', () => {
+    const cols: Record<string, string> = { clean_addr: '홍은동 455', upper_pk: '11410-261' }
+    mergeStdLinkCols(cols, STD)
+    expect(cols.std_link_key).toBe('S_11410_R_11410-261')
+    expect(cols.bld_nm).toBe('홍은동벽산아파트')
+    expect(cols.mgm_bld_pk).toBeUndefined()
+    expect(cols.upper_pk).toBe('11410-261')
+  })
+
+  it('총괄표제부 PK가 비어 있으면 소속 총괄로 보강한다', () => {
+    const cols: Record<string, string> = { upper_pk: '' }
+    mergeStdLinkCols(cols, { ...STD, mgm_upper_bld_pk: '11410-261' })
+    expect(cols.upper_pk).toBe('11410-261')
+  })
+
+  it('빈 조회 값은 기존 컬럼을 덮지 않는다', () => {
+    const cols: Record<string, string> = { std_link_key: 'T_1' }
+    mergeStdLinkCols(cols, { std_link_key: '' })
+    expect(cols.std_link_key).toBe('T_1')
+  })
+
+  it('병합 키는 모두 표시 컬럼(KEYGEN_COLUMNS)에 있다', () => {
+    const shown = new Set(KEYGEN_COLUMNS.map((c) => c.key))
+    for (const k of STD_LINK_MERGE_KEYS) expect(shown.has(k)).toBe(true)
   })
 })

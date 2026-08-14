@@ -30,6 +30,8 @@ export interface BulkResultRecord {
   kind?: 'info' | 'keygen'
   /** 업로드 원본 B열~ 헤더 — rows[].extra와 짝. 없는 과거 레코드는 원본 컬럼 없음 */
   extraHeaders?: string[]
+  /** 사용자가 붙인 이력 이름 — 목록·Modal에서 파일명 대신 표시(파일명은 보조 표기) */
+  label?: string
 }
 
 /** 이력 목록 표시용 (rows 제외) */

@@ -3,8 +3,10 @@ import {
   STD_LINK_COLUMNS,
   detectStdLinkParam,
   extractRecapGroup,
+  extractStdLinkKeyFor,
   extractTitleRecords,
   flattenStdLinkKey,
+  parseStdLinkKeyStructure,
 } from '~/lib/std-link-key'
 
 /** 실서버 응답 형태의 레코드 샘플 (2026-08-06 실측 축약) */
@@ -31,9 +33,11 @@ const TITLE = {
 }
 
 describe('detectStdLinkParam', () => {
-  it('R_/T_ 접두는 std_link_key로 조회한다 (소문자 허용)', () => {
+  it('R_/T_/S_ 접두는 std_link_key로 조회한다 (소문자 허용)', () => {
     expect(detectStdLinkParam('R_11110-1')).toBe('std_link_key')
     expect(detectStdLinkParam('t_11680-12777')).toBe('std_link_key')
+    // 총괄 다건 그룹 키 (2026-08-14 실측: 홍은동 455)
+    expect(detectStdLinkParam('S_11410_R_11410-261')).toBe('std_link_key')
   })
 
   it('하이픈 없는 값은 신형 PK로 보고 mgm_bld_pk_new로 조회한다', () => {
@@ -87,6 +91,39 @@ describe('flattenStdLinkKey', () => {
   })
 })
 
+describe('parseStdLinkKeyStructure', () => {
+  it('R_ 키는 총괄표제부 키로 분해한다', () => {
+    const p = parseStdLinkKeyStructure('R_11110-1')
+    expect(p?.kind).toBe('R')
+    expect(p?.pk).toBe('11110-1')
+    expect(p?.sigunguCd).toBe('')
+    expect(p?.pkLabel).toBe('총괄표제부 PK')
+  })
+
+  it('T_ 키는 표제부 키로 분해한다 (소문자·공백 허용)', () => {
+    const p = parseStdLinkKeyStructure(' t_11680-12777 ')
+    expect(p?.kind).toBe('T')
+    expect(p?.pk).toBe('11680-12777')
+  })
+
+  it('S_ 키는 시군구코드와 대표 총괄 PK로 분해한다', () => {
+    const p = parseStdLinkKeyStructure('S_11410_R_11410-261')
+    expect(p?.kind).toBe('S')
+    expect(p?.sigunguCd).toBe('11410')
+    expect(p?.pk).toBe('11410-261')
+    expect(p?.pkLabel).toBe('대표 총괄표제부 PK')
+  })
+
+  it('키 형식이 아니면 null — 주소·PK·불완전한 키', () => {
+    expect(parseStdLinkKeyStructure('대청로 119')).toBeNull()
+    expect(parseStdLinkKeyStructure('11680-12777')).toBeNull()
+    expect(parseStdLinkKeyStructure('1024112777')).toBeNull()
+    expect(parseStdLinkKeyStructure('R_')).toBeNull()
+    expect(parseStdLinkKeyStructure('S_11410_R_')).toBeNull()
+    expect(parseStdLinkKeyStructure('S_114_R_11410-261')).toBeNull()
+  })
+})
+
 describe('extractRecapGroup', () => {
   it('R 레코드에서 그룹 재조회 키·총괄 PK·표제부 수를 뽑는다', () => {
     expect(extractRecapGroup([RECAP, TITLE])).toEqual({
@@ -100,6 +137,25 @@ describe('extractRecapGroup', () => {
     expect(extractRecapGroup([TITLE])).toBeNull()
     expect(extractRecapGroup({ error: 'Cannot match' })).toBeNull()
     expect(extractRecapGroup(null)).toBeNull()
+  })
+})
+
+describe('extractStdLinkKeyFor', () => {
+  it('조회한 PK와 일치하는 레코드의 표준연계키를 돌려준다', () => {
+    expect(extractStdLinkKeyFor([RECAP, TITLE], '11110-1')).toBe('R_11110-1')
+    expect(extractStdLinkKeyFor([{ ...TITLE, std_link_key: 'T_11110-2457' }], '11110-2457')).toBe(
+      'T_11110-2457',
+    )
+  })
+
+  it('일치 레코드가 없으면 첫 레코드의 키로 대신한다', () => {
+    expect(extractStdLinkKeyFor([RECAP], '11110-9999')).toBe('R_11110-1')
+  })
+
+  it('error 응답·빈 배열·키 없는 레코드는 빈 문자열', () => {
+    expect(extractStdLinkKeyFor({ error: 'Cannot match' }, '11110-1')).toBe('')
+    expect(extractStdLinkKeyFor([], '11110-1')).toBe('')
+    expect(extractStdLinkKeyFor([{ ...RECAP, std_link_key: null }], '11110-1')).toBe('')
   })
 })
 

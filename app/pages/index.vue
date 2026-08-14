@@ -27,6 +27,7 @@ import {
   type RegionCandidate,
 } from '~/lib/keygen'
 import { GRADE_DISCLAIMER, describeGrade, describeLevel } from '~/lib/match-grade'
+import { extractStdLinkKeyFor, parseStdLinkKeyStructure } from '~/lib/std-link-key'
 
 /** 단건 생성에 사용하는 대표 기능 — 주소정제 후 건축물대장번호 매칭 (3차년도) */
 const MATCH_PATH = '/sqiapi/addr/building_match_clean_union'
@@ -40,6 +41,8 @@ const JUSO_PATH = '/sqiapi/addr/asis/juso'
 const NEW2OLD_PATH = '/sqiapi/addr/convert_mgm_bld_pk_new_to_old'
 /** 위치 표시용 좌표 조회 기능 — x/y가 이미 WGS84로 변환되어 온다(2026-07-28 실측) */
 const COORD_PATH = '/sqiapi/addr/legcd_n_coord'
+/** 키 카드의 표준연계키(R_/T_) 표기용 조회 기능 — 생성 완료 직후 백그라운드 호출 */
+const STD_PATH = '/sqiapi/addr/std_link_key'
 
 // 지역 접두 없는 짧은 주소 — '대청로 119'는 부산 중구·하남시·보령시 3곳에 존재해 다지역 선택 카드가 뜨고,
 // 나머지 둘은 후보 지역이 1곳뿐이라 바로 키가 생성된다
@@ -91,6 +94,8 @@ onMounted(() => {
 
 // 주소 대신 표준연계키(PK)를 입력한 경우 — 생성 대신 조회·전환 액션 패널을 띄운다
 const pkKind = computed(() => detectPkKind(addr.value))
+// R_/T_/S_ 표준연계키를 입력한 경우 — 키 구조를 분해해 내장 PK 조회·전환 액션을 띄운다
+const stdParts = computed(() => parseStdLinkKeyStructure(addr.value))
 
 /** 생성 주소의 위경도(WGS84) — 키 카드의 위치 행·미니 지도에 사용, 조회 실패 시 행 자체를 숨긴다 */
 const coord = ref<{ lat: number; lng: number } | null>(null)
@@ -162,6 +167,49 @@ async function loadDongInfos() {
   dongLoaded.value = true
 }
 
+// PK별 표준연계키(R_/T_/S_) — 표준연계키는 총괄(또는 단독 표제부) 그룹 단위 키라서
+// 총괄 PK(없으면 표제부 PK)로만 조회한다. 생성 완료 직후 백그라운드 호출, 실패 시 표기만 생략
+const stdKeys = ref<Record<string, string>>({})
+const stdKeyLoading = ref(false)
+// 재생성 시 진행 중이던 이전 조회를 무효화하는 실행 토큰
+let stdRunId = 0
+
+async function loadStdKeys() {
+  const targets = upperPks.value.length ? upperPks.value : (success.value?.pks ?? [])
+  if (!targets.length) return
+  const run = ++stdRunId
+  stdKeyLoading.value = true
+  const apiBase = useRuntimeConfig().public.apiBase
+  const queue = [...targets]
+  await Promise.all(
+    Array.from({ length: Math.min(5, queue.length) }, async () => {
+      for (let pk = queue.shift(); pk != null && run === stdRunId; pk = queue.shift()) {
+        try {
+          const data = await $fetch(apiBase + STD_PATH, {
+            query: { mgm_bld_pk: pk },
+            timeout: 10000,
+          })
+          if (run !== stdRunId) return
+          const key = extractStdLinkKeyFor(data, pk)
+          if (key) stdKeys.value[pk] = key
+        } catch {
+          // 표준연계키는 부가 표기 — 실패한 PK만 표기를 생략한다
+          if (run !== stdRunId) return
+        }
+      }
+    }),
+  )
+  if (run === stdRunId) stdKeyLoading.value = false
+}
+
+/** 총괄 다건이 한 표준연계키 그룹에 묶인 경우(S_ 키 공유, 2026-08-14 실측) — 헤더에 한 번만 표기 */
+const sharedStdKey = computed(() => {
+  if (!multiUpper.value) return ''
+  const keys = upperPks.value.map((pk) => stdKeys.value[pk])
+  if (keys.some((k) => !k)) return ''
+  return new Set(keys).size === 1 ? keys[0]! : ''
+})
+
 /** 표제부 표시 그룹 — 총괄이 여러 건이면 총괄별로 묶고, 아니면(또는 소속 로드 전이면) 단일 그룹 */
 interface PkGroup {
   key: string
@@ -227,8 +275,8 @@ function closeSuggest() {
 function onAddrInput(e: Event) {
   const q = (e.target as HTMLInputElement).value.trim()
   clearTimeout(suggestTimer)
-  // PK 형식 입력이면 주소 자동완성은 무의미 — 검색하지 않는다
-  if (q.length < 2 || detectPkKind(q)) {
+  // PK·표준연계키 형식 입력이면 주소 자동완성은 무의미 — 검색하지 않는다
+  if (q.length < 2 || detectPkKind(q) || parseStdLinkKeyStructure(q)) {
     closeSuggest()
     return
   }
@@ -280,7 +328,7 @@ function onAddrKeydown(e: KeyboardEvent) {
 
 async function generate() {
   const address = addr.value.trim()
-  if (!address || loading.value || pkKind.value) return
+  if (!address || loading.value || pkKind.value || stdParts.value) return
 
   closeSuggest()
   lastAddr.value = address
@@ -296,6 +344,9 @@ async function generate() {
   dongLoaded.value = false
   subOpen.value = {}
   groupOpen.value = {}
+  stdRunId++
+  stdKeys.value = {}
+  stdKeyLoading.value = false
   regionChoices.value = []
   regionsTruncated.value = false
   coord.value = null
@@ -368,8 +419,9 @@ async function generate() {
     history.add({ addr: address, upperPk: p.result.upperPk, pks: p.result.pks, ok: true })
     // 성공한 경우에만 위치 표시 — 다지역·실패 케이스의 좌표는 임의 지역일 수 있어 쓰지 않는다
     coord.value = await coordP
-    // 동 정보(동 이름·주/부속 구분)는 결과 표시를 막지 않도록 백그라운드로 이어서 조회
+    // 동 정보(동 이름·주/부속 구분)·표준연계키는 결과 표시를 막지 않도록 백그라운드로 이어서 조회
     void loadDongInfos()
+    void loadStdKeys()
   }
   loading.value = false
 
@@ -433,10 +485,15 @@ async function copy(text: string) {
 async function copySummary() {
   const r = success.value
   if (!r) return
+  // 표준연계키는 그룹 단위 키 — 조회 대상(총괄, 없으면 표제부) PK 순서대로 모은다
+  const stdList = (upperPks.value.length ? upperPks.value : r.pks)
+    .map((pk) => stdKeys.value[pk])
+    .filter(Boolean)
   const lines = [
     '[표준연계키 생성 결과]',
     `입력 주소: ${lastAddr.value}`,
     `정제 주소: ${r.cleanAddr || '-'}`,
+    `표준연계키: ${[...new Set(stdList)].join(', ') || '-'}`,
     `총괄표제부 PK: ${r.upperPk || '-'}`,
     `표제부 PK (${r.pks.length}건): ${r.pks.join(', ') || '-'}`,
     `매칭 등급: ${[r.grade, r.level].filter(Boolean).join(' · ') || '-'}`,
@@ -557,7 +614,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         </div>
         <Button
           class="h-11 px-6"
-          :disabled="loading || !addr.trim() || !!pkKind"
+          :disabled="loading || !addr.trim() || !!pkKind || !!stdParts"
           @click="generate()"
         >
           {{ loading ? '생성 중…' : '표준연계키 생성' }}
@@ -597,6 +654,32 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
           >
             기존 PK로 전환
           </NuxtLink>
+        </div>
+      </div>
+
+      <!-- 표준연계키(R_/T_/S_) 입력 감지 — 키 구조를 분해해 내장 PK로 조회·전환 액션 제시 -->
+      <div
+        v-else-if="stdParts"
+        class="mt-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3"
+      >
+        <p class="text-sm font-medium">표준연계키({{ stdParts.kindLabel }})가 입력되었습니다</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">{{ stdParts.desc }}</p>
+        <dl class="mt-2 grid grid-cols-[7.5rem_1fr] gap-y-0.5 text-xs">
+          <template v-if="stdParts.sigunguCd">
+            <dt class="text-muted-foreground">시군구코드</dt>
+            <dd class="font-mono">{{ stdParts.sigunguCd }}</dd>
+          </template>
+          <dt class="text-muted-foreground">{{ stdParts.pkLabel }}</dt>
+          <dd class="font-mono break-all">{{ stdParts.pk }}</dd>
+        </dl>
+        <div class="mt-2.5 flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" @click="copy(stdParts.pk)">PK 복사</Button>
+          <Button variant="outline" size="sm" @click="openInfo(stdParts.pk)">
+            건축물대장 정보 보기
+          </Button>
+          <Button variant="outline" size="sm" @click="openConvert(stdParts.pk)">
+            신규 PK 전환
+          </Button>
         </div>
       </div>
 
@@ -686,6 +769,41 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
               {{ success.pks.length }}건에서 건물을 확인해 사용하세요
             </template>
           </p>
+          <!-- 표준연계키(R_/T_/S_) — 총괄(또는 단독 표제부) 그룹 단위 키. 대표 키가 있거나
+               총괄 다건이 한 키를 공유하면 헤더에, 아니면 아래 그룹·행별로 표기한다 -->
+          <div
+            v-if="mainPk || sharedStdKey"
+            class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2"
+          >
+            <span class="text-xs font-bold text-muted-foreground">표준연계키</span>
+            <template v-if="sharedStdKey || (mainPk && stdKeys[mainPk])">
+              <span class="font-mono text-base font-semibold break-all">
+                {{ sharedStdKey || stdKeys[mainPk] }}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 text-xs"
+                @click="copy(sharedStdKey || stdKeys[mainPk] || '')"
+              >
+                복사
+              </Button>
+              <span v-if="sharedStdKey" class="text-xs text-muted-foreground">
+                총괄표제부 {{ upperPks.length }}건 공통
+              </span>
+            </template>
+            <span
+              v-else-if="stdKeyLoading"
+              class="flex items-center gap-1.5 text-xs text-muted-foreground"
+            >
+              <span
+                class="size-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+              />
+              조회 중…
+            </span>
+            <span v-else class="text-xs text-muted-foreground">—</span>
+          </div>
+          <ApiUsageNote class="mt-1.5" label="표준연계키 조회" :paths="[STD_PATH]" />
         </div>
 
         <!-- 표제부 PK 목록 (총괄 PK가 있거나 여러 건일 때) — 동 정보 로드 후 주/부속건축물 구분 -->
@@ -776,6 +894,28 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
               >
                 신규 PK 전환
               </Button>
+              <!-- 그룹 단위 표준연계키 — 접힘 상태에서도 보이도록 헤더 안 전체 폭 행으로 표기.
+                   총괄 전체가 한 키를 공유하면 카드 헤더에 한 번만 표기하고 여기서는 생략 -->
+              <div
+                v-if="!sharedStdKey && (stdKeys[g.upperPk] || stdKeyLoading)"
+                class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 pl-6"
+              >
+                <span class="text-[11px] font-medium text-muted-foreground">표준연계키</span>
+                <template v-if="stdKeys[g.upperPk]">
+                  <span class="font-mono text-sm font-semibold break-all">
+                    {{ stdKeys[g.upperPk] }}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 text-xs"
+                    @click="copy(stdKeys[g.upperPk] ?? '')"
+                  >
+                    복사
+                  </Button>
+                </template>
+                <span v-else class="text-xs text-muted-foreground">조회 중…</span>
+              </div>
             </div>
             <div
               v-else-if="g.key === 'etc'"
@@ -796,6 +936,11 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                     {{ pk }}
                     <span v-if="dongText(pk)" class="ml-1 font-sans text-xs text-muted-foreground">
                       {{ dongText(pk) }}
+                    </span>
+                    <!-- 총괄 없는 단독 표제부만 PK별 표준연계키(T_)가 조회되어 있다 -->
+                    <span v-if="stdKeys[pk]" class="mt-0.5 block text-xs break-all">
+                      <span class="font-sans text-muted-foreground">표준연계키</span>
+                      {{ stdKeys[pk] }}
                     </span>
                   </span>
                   <Button variant="ghost" size="sm" class="h-9 text-xs md:h-7" @click="copy(pk)">

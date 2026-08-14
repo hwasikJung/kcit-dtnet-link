@@ -40,14 +40,43 @@ export function parseAddrSheet(aoa: unknown[][]): {
   return { hadHeader, extraHeaders, rows }
 }
 
-/** 키 일괄 생성 결과의 B열~ 표시 컬럼 (선정·순서·한글명은 이 모듈에서만 관리) */
+/** 키 일괄 생성 결과의 B열~ 표시 컬럼 (선정·순서·한글명은 이 모듈에서만 관리).
+ * 매칭 컬럼에 더해 PK기반 탭(STD_LINK_COLUMNS)과 동일한 표준연계키 조회 값을 제공한다 —
+ * 기존 PK·소속 총괄 PK는 총괄표제부/표제부 PK 컬럼과 중복이라 제외 */
 export const KEYGEN_COLUMNS: { key: string; label: string }[] = [
   { key: 'clean_addr', label: '정제 주소' },
+  { key: 'std_link_key', label: '표준연계키' },
+  { key: 'regstr_kind', label: '대장종류' },
   { key: 'upper_pk', label: '총괄표제부 PK' },
   { key: 'pks', label: '표제부 PK' },
   { key: 'pk_count', label: '표제부 수' },
+  { key: 'mgm_bld_pk_new', label: '신규 PK' },
+  { key: 'bld_nm', label: '건물명' },
+  { key: 'plat_addr', label: '지번주소' },
+  { key: 'road_plat_addr', label: '도로명주소' },
+  { key: 'pnu', label: 'PNU' },
   { key: 'grade', label: '매칭 등급' },
 ]
+
+/** 키 생성 결과에 병합하는 std_link_key 조회 컬럼 키 목록 */
+export const STD_LINK_MERGE_KEYS = [
+  'std_link_key',
+  'regstr_kind',
+  'mgm_bld_pk_new',
+  'bld_nm',
+  'plat_addr',
+  'road_plat_addr',
+  'pnu',
+] as const
+
+/** 대표 PK(총괄 첫 건, 없으면 첫 표제부)로 조회한 std_link_key 컬럼을 키 생성 결과에 병합.
+ * 총괄표제부 PK가 비어 있으면 소속 총괄(mgm_upper_bld_pk)로 보강한다 */
+export function mergeStdLinkCols(cols: Record<string, string>, std: Record<string, string>): void {
+  for (const k of STD_LINK_MERGE_KEYS) {
+    if (std[k]) cols[k] = std[k]
+  }
+  if (!cols.upper_pk && std.mgm_upper_bld_pk) cols.upper_pk = std.mgm_upper_bld_pk
+}
 
 /** building_match_clean_union 응답 → 행 상태 + B열~ 표시 컬럼 값.
  * regions(주소검색 후보의 시군구)가 2곳 이상이면 같은 주소가 여러 지역에 있는 것이므로

@@ -9,9 +9,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { parseBulkSheet, pasteToAoa } from '~/lib/bulk-parse'
+import { buildBulkSummary } from '~/lib/bulk-summary'
 import { parseBulkHistoryFile, serializeBulkHistory } from '~/lib/history-io'
 import { extractRegionCandidates, type RegionCandidate } from '~/lib/keygen'
-import { KEYGEN_COLUMNS, flattenKeygenResult, parseAddrSheet } from '~/lib/keygen-bulk'
+import {
+  KEYGEN_COLUMNS,
+  flattenKeygenResult,
+  mergeStdLinkCols,
+  parseAddrSheet,
+} from '~/lib/keygen-bulk'
 import { STD_LINK_COLUMNS, detectStdLinkParam, flattenStdLinkKey } from '~/lib/std-link-key'
 import type { BulkHistoryMeta, BulkResultRecord, BulkRow } from '~/types/bulk'
 
@@ -42,7 +48,7 @@ const MODES: Record<
 > = {
   info: {
     tab: 'PK기반 일괄처리',
-    desc: '생성된 키를 활용하는 단계입니다. 엑셀 A열에 표준연계키(R_/T_ 접두) 또는 건축물대장 PK(기존·신규)를 담아 업로드하면 표준연계키와 대장 PK·건물명·주소·PNU 등 연계 정보를 일괄 조회합니다.',
+    desc: '생성된 키를 활용하는 단계입니다. 엑셀 A열에 표준연계키(R_/T_/S_ 접두) 또는 건축물대장 PK(기존·신규)를 담아 업로드하면 표준연계키와 대장 PK·건물명·주소·PNU 등 연계 정보를 일괄 조회합니다.',
     keyLabel: '표준연계키',
     hint: 'A열 = 표준연계키 또는 대장 PK',
     runLabel: '일괄 조회',
@@ -57,7 +63,7 @@ const MODES: Record<
   },
   keygen: {
     tab: '주소기반 일괄처리',
-    desc: '건물 주소로 표준연계키를 만드는 단계입니다. 엑셀 A열에 주소를 담아 업로드하면 주소 정제·건축물대장 매칭을 거쳐 표준연계키를 일괄 생성합니다.',
+    desc: '건물 주소로 표준연계키를 만드는 단계입니다. 엑셀 A열에 주소를 담아 업로드하면 주소 정제·건축물대장 매칭을 거쳐 표준연계키를 일괄 생성하고, PK기반 조회와 동일한 연계 정보(표준연계키·신규 PK·건물명·주소·PNU)를 함께 제공합니다.',
     keyLabel: '주소',
     hint: 'A열 = 건물 주소',
     runLabel: '일괄 생성',
@@ -131,6 +137,8 @@ function switchMode(next: BulkMode) {
   progress.value = { done: 0, total: 0 }
   pasteOpen.value = false
   pasteText.value = ''
+  colSelectOpen.value = false
+  excludedCols.value = new Set()
 }
 
 const validCount = computed(() => rows.value.filter((r) => !r.invalid).length)
@@ -249,18 +257,21 @@ async function lookupOne(
         ),
       ])
       const flat = flattenKeygenResult(raw, regions)
-      // 매칭 응답에 총괄표제부 PK가 비어 있으면 std_link_key에서 소속 총괄(mgm_upper_bld_pk)을
-      // 찾아 채운다 — 실패 시 보강만 생략(fail-open). 같은 행의 표제부들은 같은 대지라 첫 PK만 조회
-      if (flat.status === 'success' && !flat.cols.upper_pk && flat.cols.pks) {
-        const firstPk = flat.cols.pks.split(',')[0]!.trim()
-        const upper = await $fetch(apiBase + '/sqiapi/addr/std_link_key', {
-          query: { mgm_bld_pk: firstPk },
-          timeout: 5000,
-        }).then(
-          (d) => flattenStdLinkKey(d).cols.mgm_upper_bld_pk ?? '',
-          () => '',
-        )
-        if (upper) flat.cols.upper_pk = upper
+      // PK기반 탭과 동일한 표준연계키 조회 값을 함께 제공 — 대표 PK(총괄 첫 건, 없으면 첫
+      // 표제부)로 std_link_key를 후속 조회해 병합한다. 총괄 PK가 비어 있으면 소속 총괄
+      // (mgm_upper_bld_pk) 보강도 병합에서 함께 처리. 실패 시 병합만 생략(fail-open)
+      if (flat.status === 'success') {
+        const repPk = (flat.cols.upper_pk || flat.cols.pks || '').split(',')[0]!.trim()
+        if (repPk) {
+          const std = await $fetch(apiBase + '/sqiapi/addr/std_link_key', {
+            query: { mgm_bld_pk: repPk },
+            timeout: 5000,
+          }).then(
+            (d) => flattenStdLinkKey(d).cols,
+            () => null,
+          )
+          if (std) mergeStdLinkCols(flat.cols, std)
+        }
       }
       return { raw, ...flat }
     }
@@ -319,6 +330,8 @@ async function executeLookups(keys: string[]) {
 const lastRecordId = ref('')
 
 async function saveRecord() {
+  // 재시도 저장이 같은 id를 덮어쓸 때 사용자가 붙인 이력 이름이 사라지지 않게 유지한다
+  const prevLabel = (await history.get(lastRecordId.value))?.label
   const record: BulkResultRecord = {
     id: lastRecordId.value,
     fileName: fileName.value,
@@ -329,6 +342,7 @@ async function saveRecord() {
     rows: structuredClone(toRaw(rows.value)),
     kind: mode.value,
     extraHeaders: [...extraHeaders.value],
+    label: prevLabel,
   }
   try {
     await history.save(record)
@@ -359,9 +373,16 @@ async function retryFailed() {
   await saveRecord()
 }
 
-async function download(target: BulkRow[], baseName: string, kind: BulkMode, extras: string[]) {
+async function download(
+  target: BulkRow[],
+  baseName: string,
+  kind: BulkMode,
+  extras: string[],
+  opts?: { columns?: { key: string; label: string }[]; processedAt?: number },
+) {
   const XLSX = await import('xlsx')
   const c = MODES[kind]
+  const columns = opts?.columns ?? c.columns
   const statusLabel = {
     pending: '대기',
     success: '성공',
@@ -371,18 +392,38 @@ async function download(target: BulkRow[], baseName: string, kind: BulkMode, ext
   }
   // 업로드 원본 컬럼(B열~)을 그대로 두고 결과 컬럼을 뒤에 붙인다 — 받은 파일에서 후처리 없이 사용
   const aoa = [
-    [c.keyLabel, ...extras, ...c.columns.map((col) => col.label), '상태'],
+    [c.keyLabel, ...extras, ...columns.map((col) => col.label), '상태'],
     ...target.map((r) => [
       r.pk,
       ...extras.map((_, i) => r.extra?.[i] ?? ''),
-      ...c.columns.map((col) => r.cols[col.key] ?? ''),
+      ...columns.map((col) => r.cols[col.key] ?? ''),
       statusLabel[r.status],
     ]),
   ]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '결과')
+  // 상태 집계·실패 사유 분포 요약 시트 — 보고용으로 결과 파일 하나면 되도록 동봉
+  const summaryAoa = buildBulkSummary(target, statusLabel, {
+    fileName: baseName,
+    processedAt: formatDate(opts?.processedAt ?? Date.now()),
+  })
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryAoa), '요약')
   XLSX.writeFile(wb, `${baseName.replace(/\.[^.]+$/, '')}${c.downloadSuffix}`)
 }
+
+// 다운로드 컬럼 선택 — 결과 컬럼만 선택 대상(A열·원본 열·상태는 항상 포함)
+const colSelectOpen = ref(false)
+const excludedCols = ref<Set<string>>(new Set())
+/** 체크 토글 — Set 재할당으로 반응성 유지 */
+function toggleCol(key: string) {
+  const next = new Set(excludedCols.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  excludedCols.value = next
+}
+const downloadColumns = computed(() =>
+  cfg.value.columns.filter((c) => !excludedCols.value.has(c.key)),
+)
 
 function openDetail(row: BulkRow, kind: BulkMode) {
   detailRow.value = row
@@ -398,6 +439,26 @@ async function openHistory(meta: BulkHistoryMeta) {
   }
   historyRecord.value = record
   historyOpen.value = true
+}
+
+/** 이력에 이름 붙이기 — 파일명·시각만으로 구분하기 어려운 이력에 메모용 이름을 단다 */
+async function renameHistory(meta: BulkHistoryMeta) {
+  const input = window.prompt(
+    '이력에 표시할 이름을 입력하세요. (비우면 이름 제거)',
+    meta.label ?? '',
+  )
+  if (input === null) return
+  const record = await history.get(meta.id)
+  if (!record) {
+    toast('이력을 불러오지 못했습니다.', 'error')
+    return
+  }
+  record.label = input.trim() || undefined
+  try {
+    await history.save(record)
+  } catch {
+    toast('이력 저장에 실패했습니다. (브라우저 저장소 확인)', 'error')
+  }
 }
 
 async function removeHistory(meta: BulkHistoryMeta) {
@@ -593,9 +654,20 @@ function formatDate(ts: number) {
         <Button
           v-if="finished"
           variant="outline"
-          @click="download(rows, fileName, mode, extraHeaders)"
+          @click="download(rows, fileName, mode, extraHeaders, { columns: downloadColumns })"
         >
           결과 엑셀 다운로드
+        </Button>
+        <Button
+          v-if="finished"
+          variant="ghost"
+          :aria-expanded="colSelectOpen"
+          @click="colSelectOpen = !colSelectOpen"
+        >
+          컬럼 선택
+          <template v-if="excludedCols.size">
+            ({{ downloadColumns.length }}/{{ cfg.columns.length }})
+          </template>
         </Button>
         <span class="text-xs text-muted-foreground">
           총 {{ rows.length }}행<template v-if="hadHeader"> (헤더 1행 제외)</template>
@@ -605,6 +677,38 @@ function formatDate(ts: number) {
             <span class="text-destructive">실패 {{ summary.error }}</span>
           </template>
         </span>
+      </div>
+
+      <!-- 다운로드 컬럼 선택 — 결과 엑셀에 담을 조회 컬럼만 고른다 -->
+      <div v-if="finished && colSelectOpen" class="mt-3 rounded-md border p-3">
+        <p class="text-xs text-muted-foreground">
+          결과 엑셀에 포함할 컬럼을 선택하세요. A열({{ cfg.keyLabel }})·원본 열·상태·요약 시트는
+          항상 포함됩니다.
+        </p>
+        <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+          <label
+            v-for="col in cfg.columns"
+            :key="col.key"
+            class="flex cursor-pointer items-center gap-1.5 text-sm"
+          >
+            <input
+              type="checkbox"
+              class="accent-primary"
+              :checked="!excludedCols.has(col.key)"
+              @change="toggleCol(col.key)"
+            />
+            {{ col.label }}
+          </label>
+        </div>
+        <Button
+          v-if="excludedCols.size"
+          variant="ghost"
+          size="sm"
+          class="mt-2 h-7 text-xs"
+          @click="excludedCols = new Set()"
+        >
+          전체 선택
+        </Button>
       </div>
 
       <!-- 진행률 바 + 남은 시간 추정 -->
@@ -686,10 +790,12 @@ function formatDate(ts: number) {
               <Badge variant="outline" class="shrink-0 text-[11px]">
                 {{ MODES[kindOf(item)].tab }}
               </Badge>
-              <span class="truncate">{{ item.fileName }}</span>
+              <span class="truncate">{{ item.label || item.fileName }}</span>
             </p>
             <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ formatDate(item.createdAt) }} · 총 {{ item.total }}행
+              {{ formatDate(item.createdAt) }} · 총 {{ item.total }}행<template v-if="item.label">
+                · {{ item.fileName }}</template
+              >
             </p>
           </div>
           <Badge class="border-transparent bg-success text-success-foreground text-[11px]"
@@ -701,6 +807,9 @@ function formatDate(ts: number) {
           <Badge class="border-transparent bg-destructive text-white text-[11px]"
             >실패 {{ item.error }}</Badge
           >
+          <Button variant="ghost" size="sm" class="shrink-0" @click.stop="renameHistory(item)">
+            이름
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -717,9 +826,10 @@ function formatDate(ts: number) {
     <Dialog v-model:open="historyOpen">
       <DialogScrollContent class="max-w-6xl">
         <DialogHeader>
-          <DialogTitle>{{ historyRecord?.fileName }}</DialogTitle>
+          <DialogTitle>{{ historyRecord?.label || historyRecord?.fileName }}</DialogTitle>
           <DialogDescription>
             <template v-if="historyRecord">
+              <template v-if="historyRecord.label">{{ historyRecord.fileName }} · </template>
               {{ MODES[kindOf(historyRecord)].tab }} · {{ formatDate(historyRecord.createdAt) }} ·
               총 {{ historyRecord.total }}행 · 성공 {{ historyRecord.success }} ·
               {{ MODES[kindOf(historyRecord)].statusLabels.notfound ?? '미존재' }}
@@ -738,6 +848,7 @@ function formatDate(ts: number) {
                 historyRecord.fileName,
                 kindOf(historyRecord),
                 historyRecord.extraHeaders ?? [],
+                { processedAt: historyRecord.createdAt },
               )
             "
           >
