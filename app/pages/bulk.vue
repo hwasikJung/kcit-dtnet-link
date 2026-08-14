@@ -49,7 +49,7 @@ const MODES: Record<
   info: {
     tab: 'PK기반 일괄처리',
     desc: '생성된 키를 활용하는 단계입니다. 엑셀 A열에 표준연계키(R_/T_/S_ 접두) 또는 건축물대장 PK(기존·신규)를 담아 업로드하면 표준연계키와 대장 PK·건물명·주소·PNU 등 연계 정보를 일괄 조회합니다.',
-    keyLabel: '표준연계키',
+    keyLabel: '입력값',
     hint: 'A열 = 표준연계키 또는 대장 PK',
     runLabel: '일괄 조회',
     columns: STD_LINK_COLUMNS,
@@ -609,7 +609,7 @@ function formatDate(ts: number) {
       <div v-if="pasteOpen" class="mt-4 border-t pt-4">
         <label for="bulk-paste" class="text-sm font-medium">텍스트로 붙여넣기</label>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          {{ cfg.keyLabel }}를 한 줄에 하나씩 입력하세요. 엑셀에서 복사한 표(여러 열)도 그대로
+          {{ cfg.keyLabel }} 목록을 한 줄에 하나씩 입력하세요. 엑셀에서 복사한 표(여러 열)도 그대로
           붙여넣을 수 있습니다(첫 열 = {{ cfg.keyLabel }}).
         </p>
         <textarea
