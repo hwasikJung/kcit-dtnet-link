@@ -575,6 +575,16 @@ function formatDate(ts: number) {
     </p>
     <ApiUsageNote class="mt-1" :paths="cfg.apiPaths" />
 
+    <!-- 표준연계키 접두(R_/T_/S_) 도움말 — 두 탭 모두 결과에 키가 표시되므로 항상 제공 -->
+    <details class="mt-2">
+      <summary class="cursor-pointer text-xs text-muted-foreground select-none">
+        표준연계키 형식(R_/T_/S_) 안내
+      </summary>
+      <div class="mt-2 max-w-2xl rounded-md border bg-card p-3">
+        <StdKeyLegend />
+      </div>
+    </details>
+
     <!-- 업로드 -->
     <section class="mt-4 rounded-lg border p-4">
       <div class="flex flex-wrap items-center gap-3">
@@ -601,7 +611,7 @@ function formatDate(ts: number) {
         <span v-if="fileName" class="text-sm">{{ fileName }}</span>
         <span class="text-xs text-muted-foreground">
           {{ cfg.hint }} · 1행 헤더 자동 감지 · 최대 {{ MAX_ROWS.toLocaleString() }}행 · B열~ 원본
-          열은 결과 엑셀에 보존
+          열 유지, 결과 컬럼은 그 뒤에 추가
         </span>
       </div>
 

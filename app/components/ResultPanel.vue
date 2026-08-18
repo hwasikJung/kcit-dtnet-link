@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { copyText } from '~/lib/copy-text'
 
 export interface RunResult {
   status: number | null
@@ -16,12 +17,9 @@ const { toast } = useToast()
 
 async function copyJson() {
   if (props.result?.data == null) return
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(props.result.data, null, 2))
+  if (await copyText(JSON.stringify(props.result.data, null, 2)))
     toast('응답 JSON을 클립보드에 복사했습니다.')
-  } catch {
-    toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
-  }
+  else toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
 }
 
 const isOk = computed(() => props.result?.status != null && props.result.status < 400)

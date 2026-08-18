@@ -93,6 +93,15 @@ export function parseConvertResponse(data: unknown): ConvertResult {
   return { newPk, error: '' }
 }
 
+/** convert_mgm_bld_pk_new_to_old 응답 → 기존 PK.
+ * 성공: [{"mgm_bld_pk":"41450-100312801", ...}] 레코드 배열, 미존재: {"error":"Cannot find old PK ..."} */
+export function extractOldPkFromConvert(data: unknown): string | null {
+  if (!Array.isArray(data)) return null
+  const first = data[0] as { mgm_bld_pk?: unknown } | undefined
+  const pk = String(first?.mgm_bld_pk ?? '').trim()
+  return pk || null
+}
+
 export interface RegionCandidate {
   /** 시/도 (예: 부산광역시) */
   si: string
@@ -265,13 +274,15 @@ export function parseKeygenResponse(data: unknown): KeygenParse {
 
 /**
  * 입력이 주소가 아니라 표준연계키(PK) 형식인지 감지.
- * 구형: "11680-12777"(시군구코드 5자리 - 일련번호) / 신형: 10자리 숫자(예: 1024112777).
+ * 구형: "11680-12777"(시군구코드 5자리 - 일련번호) / 신형: 자릿수 고정이 아닌 숫자열
+ * (실측 6자리 100211 ~ 14자리 11151100312801 관찰) — 순수 숫자 입력은 주소일 수 없어
+ * 6자리 이상이면 신형 PK로 본다(하한은 타이핑 중 오탐 방지용).
  * 신형 PK는 mgm_bld_pk_info에서 조회되지 않아(실서버 "Cannot match") 구분이 필요하다.
  */
 export function detectPkKind(input: string): 'old' | 'new' | null {
   const v = input.trim()
   if (/^\d{5}-\d+$/.test(v)) return 'old'
-  if (/^\d{10}$/.test(v)) return 'new'
+  if (/^\d{6,}$/.test(v)) return 'new'
   return null
 }
 

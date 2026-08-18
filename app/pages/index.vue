@@ -15,6 +15,7 @@ import {
   extractAddrSuggestions,
   extractCoord,
   extractDongInfo,
+  extractOldPkFromConvert,
   extractRegionCandidates,
   isRegionListTruncated,
   parseConvertResponse,
@@ -26,8 +27,15 @@ import {
   type KeygenParse,
   type RegionCandidate,
 } from '~/lib/keygen'
+import { copyText } from '~/lib/copy-text'
 import { GRADE_DISCLAIMER, describeGrade, describeLevel } from '~/lib/match-grade'
-import { extractStdLinkKeyFor, parseStdLinkKeyStructure } from '~/lib/std-link-key'
+import {
+  detectStdLinkParam,
+  extractStdLinkKeyFor,
+  extractStdLinkRows,
+  parseStdLinkKeyStructure,
+  type StdLinkRow,
+} from '~/lib/std-link-key'
 
 /** 단건 생성에 사용하는 대표 기능 — 주소정제 후 건축물대장번호 매칭 (3차년도) */
 const MATCH_PATH = '/sqiapi/addr/building_match_clean_union'
@@ -96,6 +104,53 @@ onMounted(() => {
 const pkKind = computed(() => detectPkKind(addr.value))
 // R_/T_/S_ 표준연계키를 입력한 경우 — 키 구조를 분해해 내장 PK 조회·전환 액션을 띄운다
 const stdParts = computed(() => parseStdLinkKeyStructure(addr.value))
+
+// PK·표준연계키 입력 감지 시 std_link_key 자동 조회 — 표준연계키와 소속 건물 목록을 패널에 표시
+const stdLookup = ref<{
+  status: 'loading' | 'done' | 'notfound' | 'error'
+  key: string
+  rows: StdLinkRow[]
+} | null>(null)
+// 입력 수정 시 진행 중이던 이전 조회를 무효화하는 실행 토큰
+let stdLookupRunId = 0
+let stdLookupTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(
+  () => addr.value.trim(),
+  (v) => {
+    clearTimeout(stdLookupTimer)
+    stdLookupRunId++
+    if (!v || (!detectPkKind(v) && !parseStdLinkKeyStructure(v))) {
+      stdLookup.value = null
+      return
+    }
+    // 타이핑 중 매 글자 호출 방지 — 입력이 잠시 멈춘 뒤 1회만 조회
+    stdLookupTimer = setTimeout(() => lookupStdKey(v), 400)
+  },
+)
+
+async function lookupStdKey(value: string) {
+  const run = ++stdLookupRunId
+  stdLookup.value = { status: 'loading', key: '', rows: [] }
+  try {
+    const data = await $fetch(useRuntimeConfig().public.apiBase + STD_PATH, {
+      // 입력 형식(R_/T_/S_ 접두·하이픈 유무)에 맞는 쿼리 파라미터로 조회 — 메뉴2와 동일 규칙
+      query: { [detectStdLinkParam(value)]: value },
+      timeout: 10000,
+    })
+    if (run !== stdLookupRunId) return
+    const rows = extractStdLinkRows(data)
+    if (!rows.length) {
+      stdLookup.value = { status: 'notfound', key: '', rows: [] }
+      return
+    }
+    const keys = [...new Set(rows.map((r) => r.stdLinkKey).filter(Boolean))]
+    stdLookup.value = { status: 'done', key: keys.join(', '), rows }
+  } catch {
+    if (run !== stdLookupRunId) return
+    stdLookup.value = { status: 'error', key: '', rows: [] }
+  }
+}
 
 /** 생성 주소의 위경도(WGS84) — 키 카드의 위치 행·미니 지도에 사용, 조회 실패 시 행 자체를 숨긴다 */
 const coord = ref<{ lat: number; lng: number } | null>(null)
@@ -429,12 +484,62 @@ async function generate() {
   resultSection.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
 }
 
+/** 화면 초기화 — 입력값·생성 결과·조회 패널을 모두 지우고 첫 화면으로 되돌린다 */
+function resetAll() {
+  if (loading.value) return
+  closeSuggest()
+  addr.value = ''
+  lastAddr.value = ''
+  started.value = false
+  parsed.value = null
+  raw.value = null
+  networkError.value = ''
+  elapsedMs.value = 0
+  stepStates.value = ['idle', 'idle', 'idle']
+  dongRunId++
+  dongInfos.value = {}
+  dongLoading.value = false
+  dongLoaded.value = false
+  subOpen.value = {}
+  groupOpen.value = {}
+  stdRunId++
+  stdKeys.value = {}
+  stdKeyLoading.value = false
+  regionChoices.value = []
+  regionsTruncated.value = false
+  coord.value = null
+  mapOpen.value = false
+  router.replace({ query: {} })
+  addrInput.value?.$el?.querySelector?.('input')?.focus()
+}
+
 // 대장 정보 모달 — 전체 기능 페이지로 이동하지 않고 모달에서 확인(BldInfoDialog)
 const infoOpen = ref(false)
 const infoPk = ref('')
 function openInfo(pk: string) {
   infoPk.value = pk
   infoOpen.value = true
+}
+
+// 신규 PK 대장 정보 — 서버가 신규 PK 직접 조회를 지원하지 않아(mgm_bld_pk_info "Cannot match",
+// 2026-08-18 재실측) 기존 PK로 자동 전환한 뒤 대장 정보 모달을 연다(사용자에게는 클릭 1번)
+const infoByNewLoading = ref(false)
+async function openInfoByNewPk(newPk: string) {
+  if (infoByNewLoading.value) return
+  infoByNewLoading.value = true
+  try {
+    const data = await $fetch(useRuntimeConfig().public.apiBase + NEW2OLD_PATH, {
+      query: { mgm_bld_pk_new: newPk },
+      timeout: 10000,
+    })
+    const oldPk = extractOldPkFromConvert(data)
+    if (oldPk) openInfo(oldPk)
+    else toast('이 신규 PK에 대응하는 기존 PK가 등재되어 있지 않습니다.', 'error')
+  } catch {
+    toast('기존 PK 전환 중 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'error')
+  } finally {
+    infoByNewLoading.value = false
+  }
 }
 
 // 신규 PK 전환 모달 — 페이지 이동 없이 변환 기능을 직접 호출해 결과를 보여준다
@@ -473,12 +578,8 @@ async function openConvert(pk: string) {
 }
 
 async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast('표준연계키를 클립보드에 복사했습니다.')
-  } catch {
-    toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
-  }
+  if (await copyText(text)) toast('표준연계키를 클립보드에 복사했습니다.')
+  else toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
 }
 
 /** 생성 결과 전체(주소·키·등급)를 텍스트로 복사 — 보고서·메일 붙여넣기용 */
@@ -498,23 +599,15 @@ async function copySummary() {
     `표제부 PK (${r.pks.length}건): ${r.pks.join(', ') || '-'}`,
     `매칭 등급: ${[r.grade, r.level].filter(Boolean).join(' · ') || '-'}`,
   ]
-  try {
-    await navigator.clipboard.writeText(lines.join('\n'))
-    toast('생성 결과 요약을 클립보드에 복사했습니다.')
-  } catch {
-    toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
-  }
+  if (await copyText(lines.join('\n'))) toast('생성 결과 요약을 클립보드에 복사했습니다.')
+  else toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
 }
 
 /** 최근 생성 항목 클릭 — 주소 복원 후 바로 재생성한다 */
 /** 현재 결과의 공유 링크(?addr=) 복사 */
 async function copyLink() {
-  try {
-    await navigator.clipboard.writeText(location.href)
-    toast('생성 결과 링크를 클립보드에 복사했습니다.')
-  } catch {
-    toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
-  }
+  if (await copyText(location.href)) toast('생성 결과 링크를 클립보드에 복사했습니다.')
+  else toast('복사에 실패했습니다. 브라우저 권한을 확인해 주세요.', 'error')
 }
 
 /** 다지역 후보에서 지역 선택 — 해당 지역 전체 주소로 바로 재생성 */
@@ -619,20 +712,28 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
         >
           {{ loading ? '생성 중…' : '표준연계키 생성' }}
         </Button>
+        <Button
+          v-if="addr || started"
+          variant="outline"
+          class="h-11"
+          :disabled="loading"
+          @click="resetAll()"
+        >
+          초기화
+        </Button>
       </div>
 
       <!-- PK 직접 입력 감지 — 주소 생성 대신 조회·전환 액션 제시 -->
       <div v-if="pkKind" class="mt-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
         <p class="text-sm font-medium">
-          표준연계키({{ pkKind === 'old' ? '기존' : '신규' }} 형식)가 입력되었습니다
+          {{ pkKind === 'old' ? '기존' : '신규' }} PK가 입력되었습니다
         </p>
         <p class="mt-0.5 text-xs text-muted-foreground">
           <template v-if="pkKind === 'old'">
-            이미 생성된 키라면 주소 입력 없이 바로 조회하거나 전환할 수 있습니다.
+            주소 입력 없이 바로 대장 정보를 조회하거나 신규 PK로 전환할 수 있습니다.
           </template>
           <template v-else>
-            신규 형식 키는 건축물대장 정보 조회가 되지 않아, 먼저 기존 PK로 전환한 뒤 조회할 수
-            있습니다.
+            신규 PK는 서버에서 직접 조회되지 않아, 기존 PK로 자동 전환해 대장 정보를 조회합니다.
           </template>
         </p>
         <div class="mt-2.5 flex flex-wrap gap-2">
@@ -644,16 +745,25 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
               신규 PK 전환
             </Button>
           </template>
-          <NuxtLink
-            v-else
-            :to="{
-              path: '/tools',
-              query: { path: NEW2OLD_PATH, mgm_bld_pk_new: addr.trim(), run: '1' },
-            }"
-            :class="buttonVariants({ variant: 'outline', size: 'sm' })"
-          >
-            기존 PK로 전환
-          </NuxtLink>
+          <template v-else>
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="infoByNewLoading"
+              @click="openInfoByNewPk(addr.trim())"
+            >
+              {{ infoByNewLoading ? '기존 PK 전환 중…' : '건축물대장 정보 보기' }}
+            </Button>
+            <NuxtLink
+              :to="{
+                path: '/tools',
+                query: { path: NEW2OLD_PATH, mgm_bld_pk_new: addr.trim(), run: '1' },
+              }"
+              :class="buttonVariants({ variant: 'outline', size: 'sm' })"
+            >
+              기존 PK로 전환
+            </NuxtLink>
+          </template>
         </div>
       </div>
 
@@ -681,6 +791,80 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             신규 PK 전환
           </Button>
         </div>
+      </div>
+
+      <!-- PK·표준연계키 입력 조회 결과 — std_link_key로 표준연계키와 소속 건물 목록을 자동 조회 -->
+      <div v-if="(pkKind || stdParts) && stdLookup" class="mt-2 rounded-lg border bg-card px-4 py-3">
+        <p
+          v-if="stdLookup.status === 'loading'"
+          class="flex items-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <span
+            class="size-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+          />
+          표준연계키 조회 중…
+        </p>
+        <p v-else-if="stdLookup.status === 'error'" class="text-xs text-destructive">
+          표준연계키 조회 중 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.
+        </p>
+        <p v-else-if="stdLookup.status === 'notfound'" class="text-xs text-muted-foreground">
+          입력한 값으로 등록된 표준연계키를 찾지 못했습니다.
+        </p>
+        <template v-else>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-semibold text-muted-foreground">표준연계키</span>
+            <span class="font-mono text-sm font-semibold break-all">{{ stdLookup.key || '-' }}</span>
+            <Button
+              v-if="stdLookup.key"
+              variant="outline"
+              size="sm"
+              class="h-6 px-2 text-xs"
+              @click="copy(stdLookup.key)"
+            >
+              복사
+            </Button>
+          </div>
+          <div class="mt-2 overflow-x-auto">
+            <table class="w-full min-w-[36rem] text-xs">
+              <thead>
+                <tr class="border-b text-left text-muted-foreground">
+                  <th class="py-1.5 pr-3 font-medium">대장종류</th>
+                  <th class="py-1.5 pr-3 font-medium">기존 PK</th>
+                  <th class="py-1.5 pr-3 font-medium">신규 PK</th>
+                  <th class="py-1.5 pr-3 font-medium">건물명</th>
+                  <th class="py-1.5 pr-3 font-medium">주소</th>
+                  <th class="py-1.5 font-medium"><span class="sr-only">대장 정보</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="r in stdLookup.rows"
+                  :key="r.mgmBldPk + '|' + r.mgmBldPkNew"
+                  class="border-b last:border-0"
+                >
+                  <td class="py-1.5 pr-3 whitespace-nowrap">{{ r.kindLabel || '-' }}</td>
+                  <td class="py-1.5 pr-3 font-mono whitespace-nowrap">{{ r.mgmBldPk || '-' }}</td>
+                  <td class="py-1.5 pr-3 font-mono whitespace-nowrap">{{ r.mgmBldPkNew || '-' }}</td>
+                  <td class="py-1.5 pr-3">{{ r.bldNm || '-' }}</td>
+                  <td class="py-1.5 pr-3">{{ r.addr || '-' }}</td>
+                  <td class="py-1.5 text-right whitespace-nowrap">
+                    <Button
+                      v-if="r.mgmBldPk"
+                      variant="ghost"
+                      size="sm"
+                      class="h-6 px-2 text-xs"
+                      @click="openInfo(r.mgmBldPk)"
+                    >
+                      대장 정보
+                    </Button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-1.5 text-[11px] text-muted-foreground">총 {{ stdLookup.rows.length }}건</p>
+        </template>
+        <ApiUsageNote class="mt-1.5" label="표준연계키 조회" :paths="[STD_PATH]" />
       </div>
 
       <div class="mt-3 flex flex-wrap items-center gap-1.5">
@@ -776,6 +960,22 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
             class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2"
           >
             <span class="text-xs font-bold text-muted-foreground">표준연계키</span>
+            <TooltipProvider :delay-duration="200">
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <button
+                    type="button"
+                    aria-label="표준연계키 형식 안내"
+                    class="flex size-4 items-center justify-center rounded-full border text-[10px] text-muted-foreground hover:bg-primary/5"
+                  >
+                    ?
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent class="max-w-80">
+                  <StdKeyLegend />
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <template v-if="sharedStdKey || (mainPk && stdKeys[mainPk])">
               <span class="font-mono text-base font-semibold break-all">
                 {{ sharedStdKey || stdKeys[mainPk] }}

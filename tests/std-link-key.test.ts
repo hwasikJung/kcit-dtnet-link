@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  STD_KEY_KIND_NOTES,
   STD_LINK_COLUMNS,
   detectStdLinkParam,
   extractRecapGroup,
   extractStdLinkKeyFor,
+  extractStdLinkRows,
   extractTitleRecords,
   flattenStdLinkKey,
   parseStdLinkKeyStructure,
@@ -48,6 +50,35 @@ describe('detectStdLinkParam', () => {
   it('하이픈 포함 값은 구형 PK로 보고 mgm_bld_pk로 조회한다', () => {
     expect(detectStdLinkParam('11680-12777')).toBe('mgm_bld_pk')
     expect(detectStdLinkParam(' 11680-12777 ')).toBe('mgm_bld_pk')
+  })
+})
+
+describe('extractStdLinkRows', () => {
+  it('레코드를 건물 행으로 변환하고 총괄표제부를 앞에 둔다', () => {
+    const rows = extractStdLinkRows([TITLE, RECAP])
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toEqual({
+      stdLinkKey: 'R_11110-1',
+      kindLabel: '총괄표제부',
+      mgmBldPk: '11110-1',
+      mgmBldPkNew: '100211',
+      bldNm: '',
+      addr: '서울특별시 종로구 종로14길 20',
+      pnu: '1111013500100120001',
+    })
+    expect(rows[1]!.kindLabel).toBe('표제부')
+    expect(rows[1]!.bldNm).toBe('연빌리지')
+  })
+
+  it('도로명주소가 없으면 지번주소를 쓴다', () => {
+    const rows = extractStdLinkRows([{ ...TITLE, road_plat_addr: null }])
+    expect(rows[0]!.addr).toBe('서울특별시 종로구 관철동 12-1번지')
+  })
+
+  it('오류 응답·빈 배열·비배열은 빈 목록', () => {
+    expect(extractStdLinkRows({ error: 'Cannot match' })).toEqual([])
+    expect(extractStdLinkRows([])).toEqual([])
+    expect(extractStdLinkRows(null)).toEqual([])
   })
 })
 
@@ -112,6 +143,13 @@ describe('parseStdLinkKeyStructure', () => {
     expect(p?.sigunguCd).toBe('11410')
     expect(p?.pk).toBe('11410-261')
     expect(p?.pkLabel).toBe('대표 총괄표제부 PK')
+  })
+
+  it('도움말(STD_KEY_KIND_NOTES)의 예시 키는 전부 구조 분해와 정합한다', () => {
+    expect(STD_KEY_KIND_NOTES.map((n) => n.prefix)).toEqual(['R_', 'T_', 'S_'])
+    for (const n of STD_KEY_KIND_NOTES) {
+      expect(parseStdLinkKeyStructure(n.example)?.kind).toBe(n.prefix[0])
+    }
   })
 
   it('키 형식이 아니면 null — 주소·PK·불완전한 키', () => {

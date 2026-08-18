@@ -18,6 +18,29 @@ export function detectStdLinkParam(
   return v.includes('-') ? 'mgm_bld_pk' : 'mgm_bld_pk_new'
 }
 
+/** R_/T_/S_ 접두 도움말 — 화면 안내 공용(StdKeyLegend.vue). 문구는 이 모듈에서만 관리 */
+export const STD_KEY_KIND_NOTES: { prefix: string; example: string; desc: string }[] = [
+  {
+    prefix: 'R_',
+    example: 'R_11110-1',
+    desc: '총괄표제부가 1건인 건물 — R_ 뒤가 총괄표제부 PK이며, 소속 표제부 전체가 이 키 하나를 공유합니다.',
+  },
+  {
+    prefix: 'T_',
+    example: 'T_11680-12777',
+    desc: '총괄표제부 없이 표제부 단독인 건물 — T_ 뒤가 표제부 PK입니다.',
+  },
+  {
+    prefix: 'S_',
+    example: 'S_11410_R_11410-261',
+    desc: '한 주소에 총괄표제부가 여러 건인 그룹 — 시군구코드 5자리와 대표 총괄표제부 PK로 구성되며, 그룹 전원(총괄 전부와 소속 표제부)이 같은 키를 공유합니다.',
+  },
+]
+
+/** 접두 도움말 공통 고지 — 실서버 관찰 기반 잠정 설명(2026-08-14 실측) */
+export const STD_KEY_NOTE_DISCLAIMER =
+  '실서버 관찰 기반 잠정 설명입니다 — 공식 정의가 확인되면 갱신됩니다.'
+
 /** 표준연계키 문자열의 구조 분해 결과 — 메뉴1 입력창의 키 해석 패널에 사용 */
 export interface StdLinkKeyParts {
   kind: 'R' | 'T' | 'S'
@@ -141,6 +164,43 @@ export function extractTitleRecords(data: unknown, upperPk?: string): StdLinkTit
       mgmBldPkNew: String(r.mgm_bld_pk_new ?? '').trim(),
       bldNm: String(r.bld_nm ?? '').trim(),
     }))
+}
+
+/** 조회 결과 건물 1건의 표시 정보 — 메뉴1 PK·표준연계키 입력 조회 패널에 사용 */
+export interface StdLinkRow {
+  stdLinkKey: string
+  /** 대장종류 한글 라벨 (총괄표제부/표제부, 미상이면 코드 그대로) */
+  kindLabel: string
+  mgmBldPk: string
+  mgmBldPkNew: string
+  bldNm: string
+  /** 도로명주소 우선, 없으면 지번주소 */
+  addr: string
+  pnu: string
+}
+
+/**
+ * std_link_key 응답 → 건물 행 목록. 총괄표제부(R)를 앞에 두고 표제부(T)가 뒤따른다
+ * (그룹 대표부터 보이게 — 각 묶음 내부는 응답 순서 유지). 오류 응답·빈 배열이면 [].
+ */
+export function extractStdLinkRows(data: unknown): StdLinkRow[] {
+  const records = (Array.isArray(data) ? data : []) as StdLinkRecord[]
+  const rows = records.map((r) => {
+    const gb = String(r.regstr_kind_gb ?? '').trim()
+    return {
+      stdLinkKey: String(r.std_link_key ?? '').trim(),
+      kindLabel: gb ? (REGSTR_KIND_LABEL[gb] ?? gb) : '',
+      mgmBldPk: String(r.mgm_bld_pk ?? '').trim(),
+      mgmBldPkNew: String(r.mgm_bld_pk_new ?? '').trim(),
+      bldNm: String(r.bld_nm ?? '').trim(),
+      addr: String(r.road_plat_addr ?? '').trim() || String(r.plat_addr ?? '').trim(),
+      pnu: String(r.pnu ?? '').trim(),
+    }
+  })
+  return [
+    ...rows.filter((r) => r.kindLabel === REGSTR_KIND_LABEL.R),
+    ...rows.filter((r) => r.kindLabel !== REGSTR_KIND_LABEL.R),
+  ]
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   extractCoord,
   extractDongInfo,
   extractDongLabel,
+  extractOldPkFromConvert,
   extractRegionCandidates,
   isRegionListTruncated,
   parseConvertResponse,
@@ -74,16 +75,17 @@ describe('detectPkKind', () => {
     expect(detectPkKind(' 41287-100223575 ')).toBe('old')
   })
 
-  it('신형 PK(10자리 숫자)를 감지한다', () => {
+  it('신형 PK(자릿수 비고정 숫자열)를 감지한다', () => {
     expect(detectPkKind('1024112777')).toBe('new')
+    expect(detectPkKind('11151100312801')).toBe('new') // 14자리 실입력 관찰
+    expect(detectPkKind('100211')).toBe('new') // 6자리 실측(mgm_bld_pk_new)
   })
 
   it('주소·일반 입력은 감지하지 않는다', () => {
     expect(detectPkKind('대청로 119')).toBeNull()
     expect(detectPkKind('홍은동 455')).toBeNull()
     expect(detectPkKind('123-456')).toBeNull() // 시군구 5자리 아님
-    expect(detectPkKind('123456789')).toBeNull() // 9자리
-    expect(detectPkKind('12345678901')).toBeNull() // 11자리
+    expect(detectPkKind('12345')).toBeNull() // 5자리 — 하한(6자리) 미만
     expect(detectPkKind('')).toBeNull()
   })
 })
@@ -349,6 +351,26 @@ describe('parseConvertResponse', () => {
   it('객체가 아닌 응답은 형식 오류로 판정한다', () => {
     expect(parseConvertResponse(null).error).toContain('형식')
     expect(parseConvertResponse('oops').error).toContain('형식')
+  })
+})
+
+describe('extractOldPkFromConvert', () => {
+  it('레코드 배열의 첫 건에서 기존 PK를 추출한다', () => {
+    // 2026-08-18 실서버(convert_mgm_bld_pk_new_to_old, 11151100312801) 응답 스냅샷 기반
+    expect(
+      extractOldPkFromConvert([{ mgm_bld_pk: '41450-100312801', sigungu_cd: '41450' }]),
+    ).toBe('41450-100312801')
+  })
+
+  it('미존재 PK는 error 객체로 오므로 null', () => {
+    expect(extractOldPkFromConvert({ error: 'Cannot find old PK for given new PK' })).toBeNull()
+  })
+
+  it('빈 배열·PK 빈 값·비정상 응답은 null', () => {
+    expect(extractOldPkFromConvert([])).toBeNull()
+    expect(extractOldPkFromConvert([{ mgm_bld_pk: '' }])).toBeNull()
+    expect(extractOldPkFromConvert(null)).toBeNull()
+    expect(extractOldPkFromConvert('oops')).toBeNull()
   })
 })
 
