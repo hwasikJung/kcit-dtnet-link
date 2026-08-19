@@ -4,6 +4,7 @@ import {
   KEYGEN_COLUMNS,
   STD_LINK_MERGE_KEYS,
   flattenKeygenResult,
+  mergeAddrMatchCols,
   mergeStdLinkCols,
   parseAddrSheet,
 } from '~/lib/keygen-bulk'
@@ -86,6 +87,56 @@ describe('flattenKeygenResult', () => {
     expect(r.errorMsg).toContain('찾지 못했습니다')
   })
 
+  it('유사 주소 오류는 similarAddr를 노출한다 — 일괄 자동 재조회용', () => {
+    const r = flattenKeygenResult({
+      error: 'a similar road address matched. but not return 서울특별시 종로구 낙산5길 33',
+      clean_addr: '서울특별시 종로구 창신동 23-330',
+    })
+    expect(r.status).toBe('notfound')
+    expect(r.similarAddr).toBe('서울특별시 종로구 낙산5길 33')
+  })
+
+  it('PK 없는 실패(M3)도 응답의 주소·PNU·등급을 보강해 담는다', () => {
+    // 2026-08-19 실서버 응답 축약 (경기도 안산시 단원구 초지동 606-1)
+    const r = flattenKeygenResult({
+      match_mgm_upper_bld_pks: '',
+      match_mgm_bld_pks: '',
+      match_grade: 'M3',
+      match_level: 'CASE999',
+      sigungu_cd: '41273',
+      bjdong_cd: '10700',
+      plat_gb_cd: '0',
+      bun: '0606',
+      ji: '0001',
+      plat_addr: '경기도 안산시 단원구 초지동 606-1',
+      road_plat_addr: '경기도 안산시 단원구 원초로 100',
+      clean_addr: '경기도 안산시 단원구 초지동 606-1',
+    })
+    expect(r.status).toBe('notfound')
+    expect(r.errorMsg).toContain('표준연계키가 없습니다')
+    expect(r.cols.plat_addr).toBe('경기도 안산시 단원구 초지동 606-1')
+    expect(r.cols.road_plat_addr).toBe('경기도 안산시 단원구 원초로 100')
+    expect(r.cols.pnu).toBe('4127310700106060001')
+    expect(r.cols.grade).toBe('M3 · CASE999')
+  })
+
+  it('성공 행도 union 응답의 주소·PNU를 선채운다 (std 조회 실패 대비)', () => {
+    const r = flattenKeygenResult({
+      match_mgm_bld_pks: '11320-7154',
+      match_grade: 'M1',
+      clean_addr: '서울특별시 도봉구 방학동 668-7',
+      plat_addr: '서울특별시 도봉구 방학동 668-7번지',
+      sigungu_cd: '11320',
+      bjdong_cd: '10600',
+      plat_gb_cd: '0',
+      bun: '0668',
+      ji: '0007',
+    })
+    expect(r.status).toBe('success')
+    expect(r.cols.plat_addr).toBe('서울특별시 도봉구 방학동 668-7번지')
+    expect(r.cols.pnu).toBe('1132010600106680007')
+  })
+
   it('지역 후보가 2곳 이상이면 매칭 성공 응답도 notfound(다지역 모호)로 처리한다', () => {
     const regions = [
       { si: '부산광역시', sgg: '중구', roadAddr: '부산광역시 중구 대청로 119', bldNm: '' },
@@ -131,7 +182,8 @@ describe('mergeStdLinkCols', () => {
     std_link_key: 'S_11410_R_11410-261',
     regstr_kind: '총괄표제부',
     mgm_bld_pk: '11410-261',
-    mgm_bld_pk_new: '10141261',
+    recap_pk_new: '10141261',
+    title_pk_new: '1014129220',
     bld_nm: '홍은동벽산아파트',
     plat_addr: '서울특별시 서대문구 홍은동 455번지',
     road_plat_addr: '서울특별시 서대문구 세검정로1길 95',
@@ -144,6 +196,9 @@ describe('mergeStdLinkCols', () => {
     mergeStdLinkCols(cols, STD)
     expect(cols.std_link_key).toBe('S_11410_R_11410-261')
     expect(cols.bld_nm).toBe('홍은동벽산아파트')
+    // 신규 PK는 대장종류별 컬럼으로 병합된다
+    expect(cols.recap_pk_new).toBe('10141261')
+    expect(cols.title_pk_new).toBe('1014129220')
     expect(cols.mgm_bld_pk).toBeUndefined()
     expect(cols.upper_pk).toBe('11410-261')
   })
@@ -163,5 +218,38 @@ describe('mergeStdLinkCols', () => {
   it('병합 키는 모두 표시 컬럼(KEYGEN_COLUMNS)에 있다', () => {
     const shown = new Set(KEYGEN_COLUMNS.map((c) => c.key))
     for (const k of STD_LINK_MERGE_KEYS) expect(shown.has(k)).toBe(true)
+  })
+})
+
+describe('mergeAddrMatchCols', () => {
+  it('비어 있는 주소 컬럼만 채운다 (대장 매칭 값 우선)', () => {
+    const cols: Record<string, string> = {
+      plat_addr: '기존 지번주소',
+      road_plat_addr: '',
+    }
+    mergeAddrMatchCols(cols, {
+      plat_addr: '주소매칭 지번',
+      road_plat_addr: '주소매칭 도로명',
+      bld_nm: '건강증진실',
+      zip_no: '59346',
+    })
+    expect(cols).toEqual({
+      plat_addr: '기존 지번주소',
+      road_plat_addr: '주소매칭 도로명',
+      bld_nm: '건강증진실',
+      zip_no: '59346',
+    })
+  })
+
+  it('보강 값이 비어 있으면 아무것도 하지 않는다', () => {
+    const cols: Record<string, string> = { clean_addr: 'x' }
+    mergeAddrMatchCols(cols, {})
+    expect(cols).toEqual({ clean_addr: 'x' })
+  })
+
+  it('보강 컬럼(zip_no 포함)은 모두 표시 컬럼(KEYGEN_COLUMNS)에 있다', () => {
+    const shown = new Set(KEYGEN_COLUMNS.map((c) => c.key))
+    for (const k of ['road_plat_addr', 'plat_addr', 'bld_nm', 'zip_no'])
+      expect(shown.has(k)).toBe(true)
   })
 })

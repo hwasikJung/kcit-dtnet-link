@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   detectPkKind,
+  extractAddrMatchCols,
   extractAddrSuggestions,
   extractCoord,
   extractDongInfo,
   extractDongLabel,
+  extractMatchExtras,
   extractOldPkFromConvert,
   extractRegionCandidates,
   isRegionListTruncated,
@@ -479,6 +481,18 @@ describe('parseKeygenResponse', () => {
     expect(r.similarAddr).toBe('경기도 고양시 일산서구 고양대로 283')
   })
 
+  it('유사 도로명주소 매칭(but not return) 오류도 유사 주소를 추출해 돌려준다', () => {
+    // 2026-08-19 실서버 응답 스냅샷 기반 (서울특별시 종로구 창신동 23-330)
+    const r = parseKeygenResponse({
+      error: 'a similar road address matched. but not return 서울특별시 종로구 낙산5길 33',
+      clean_addr: '서울특별시 종로구 창신동 23-330',
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.message).toContain('유사한 도로명주소')
+    expect(r.similarAddr).toBe('서울특별시 종로구 낙산5길 33')
+  })
+
   it('건물번호 누락 오류는 구체적인 안내 메시지를 돌려준다', () => {
     const r = parseKeygenResponse({ error: 'address must include a number', clean_addr: '광화문' })
     expect(r.ok).toBe(false)
@@ -496,5 +510,95 @@ describe('parseKeygenResponse', () => {
     expect(parseKeygenResponse(null).ok).toBe(false)
     expect(parseKeygenResponse('oops').ok).toBe(false)
     expect(parseKeygenResponse([1, 2]).ok).toBe(false)
+  })
+})
+
+describe('extractMatchExtras', () => {
+  const M3 = {
+    sigungu_cd: '41273',
+    bjdong_cd: '10700',
+    plat_gb_cd: '0',
+    bun: '0606',
+    ji: '0001',
+    plat_addr: '경기도 안산시 단원구 초지동 606-1',
+    road_plat_addr: '경기도 안산시 단원구 원초로 100',
+    match_grade: 'M3',
+    match_level: 'CASE999',
+  }
+
+  it('주소·등급을 담고 PNU를 시군구+법정동+토지구분+본번+부번으로 조립한다', () => {
+    const e = extractMatchExtras(M3)
+    expect(e.plat_addr).toBe('경기도 안산시 단원구 초지동 606-1')
+    expect(e.road_plat_addr).toBe('경기도 안산시 단원구 원초로 100')
+    expect(e.grade).toBe('M3 · CASE999')
+    expect(e.pnu).toBe('4127310700106060001')
+  })
+
+  it('plat_gb_cd 1(산)은 PNU 토지구분 2로 조립한다', () => {
+    expect(extractMatchExtras({ ...M3, plat_gb_cd: '1' }).pnu).toBe('4127310700206060001')
+  })
+
+  it('토지구분이 0·1이 아니거나 구성요소가 빠지면 PNU를 조립하지 않는다', () => {
+    expect(extractMatchExtras({ ...M3, plat_gb_cd: '2' }).pnu).toBeUndefined()
+    expect(extractMatchExtras({ ...M3, bun: '' }).pnu).toBeUndefined()
+    expect(extractMatchExtras({ ...M3, sigungu_cd: '412' }).pnu).toBeUndefined()
+  })
+
+  it('없는 값은 키 자체를 담지 않고, 비객체 입력은 빈 객체', () => {
+    expect(extractMatchExtras({ clean_addr: 'x' })).toEqual({})
+    expect(extractMatchExtras(null)).toEqual({})
+    expect(extractMatchExtras([1])).toEqual({})
+  })
+})
+
+// 2026-08-19 실서버(addr_match) 응답 스냅샷 기반 픽스처 — 매칭 실패 주소도 주소 정보는 반환
+const ADDR_MATCH_RES = {
+  siNm: '전남광주통합특별시',
+  sggNm: '장흥군',
+  jibunAddr: '전남광주통합특별시 장흥군 관산읍 옥당리 588-1 건강증진실',
+  jibunAddr_without_bldNm: '전남광주통합특별시 장흥군 관산읍 옥당리 588-1',
+  roadAddr: '전남광주통합특별시 장흥군 관산읍 관산우회로 99',
+  roadAddrPart1: '전남광주통합특별시 장흥군 관산읍 관산우회로 99',
+  roadAddrPart2: '',
+  zipNo: '59346',
+  bdNm: '건강증진실',
+  clean_addr: '전라남도 장흥군 관산읍 옥당리 588-1',
+}
+
+describe('extractAddrMatchCols', () => {
+  it('addr_match 응답에서 주소 정보 컬럼을 뽑는다', () => {
+    expect(extractAddrMatchCols(ADDR_MATCH_RES)).toEqual({
+      road_plat_addr: '전남광주통합특별시 장흥군 관산읍 관산우회로 99',
+      plat_addr: '전남광주통합특별시 장흥군 관산읍 옥당리 588-1',
+      bld_nm: '건강증진실',
+      zip_no: '59346',
+    })
+  })
+
+  it('지번은 건물명 없는 필드를, 도로명은 Part1을 우선한다', () => {
+    expect(
+      extractAddrMatchCols({
+        jibunAddr: '부산광역시 중구 대청동1가 36-2 어울림센터',
+        roadAddr: '부산광역시 중구 대청로 119 (대청동1가)',
+      }),
+    ).toEqual({
+      plat_addr: '부산광역시 중구 대청동1가 36-2 어울림센터',
+      road_plat_addr: '부산광역시 중구 대청로 119 (대청동1가)',
+    })
+    expect(
+      extractAddrMatchCols({
+        jibunAddr: 'x 어울림센터',
+        jibunAddr_without_bldNm: 'x',
+        roadAddr: 'y (동명)',
+        roadAddrPart1: 'y',
+      }),
+    ).toEqual({ plat_addr: 'x', road_plat_addr: 'y' })
+  })
+
+  it('주소 필드가 없거나 error 응답이면 빈 객체', () => {
+    expect(extractAddrMatchCols({ error: 'cannot match address' })).toEqual({})
+    expect(extractAddrMatchCols(null)).toEqual({})
+    expect(extractAddrMatchCols([1])).toEqual({})
+    expect(extractAddrMatchCols('x')).toEqual({})
   })
 })

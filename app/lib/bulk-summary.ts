@@ -4,6 +4,40 @@ import type { BulkRow, BulkRowStatus } from '~/types/bulk'
 /** 사유 분포가 길어지는 것을 막는 상한 — 초과분은 "기타"로 묶는다(다지역 안내처럼 행마다 문구가 다른 사유 대비) */
 const REASON_LIMIT = 15
 
+/** 결과 행 목록의 상태·사유 집계 — 요약 시트와 결과 대시보드가 공유한다 */
+export interface BulkStats {
+  total: number
+  counts: Record<BulkRowStatus, number>
+  emptyCount: number
+  dupCount: number
+  /** 실패·미매칭 사유 분포 (errorMsg 기준, 건수 내림차순 전체) */
+  reasons: { msg: string; count: number }[]
+}
+
+export function aggregateBulkStats(rows: BulkRow[]): BulkStats {
+  const counts: Record<BulkRowStatus, number> = { pending: 0, success: 0, notfound: 0, error: 0 }
+  let emptyCount = 0
+  let dupCount = 0
+  const reasons = new Map<string, number>()
+  for (const r of rows) {
+    counts[r.status]++
+    if (r.invalid === 'empty') emptyCount++
+    if (r.invalid === 'duplicate') dupCount++
+    if ((r.status === 'notfound' || r.status === 'error') && r.errorMsg) {
+      reasons.set(r.errorMsg, (reasons.get(r.errorMsg) ?? 0) + 1)
+    }
+  }
+  return {
+    total: rows.length,
+    counts,
+    emptyCount,
+    dupCount,
+    reasons: [...reasons.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([msg, count]) => ({ msg, count })),
+  }
+}
+
 /**
  * 결과 행 목록 → "요약" 시트 AoA.
  * [파일·일시] → [상태별 건수] → [실패·미매칭 사유 분포(건수 내림차순, 상위 REASON_LIMIT건)] 순.
@@ -14,9 +48,7 @@ export function buildBulkSummary(
   statusLabels: Record<BulkRowStatus, string>,
   meta: { fileName: string; processedAt: string },
 ): (string | number)[][] {
-  const count = (s: BulkRowStatus) => rows.filter((r) => r.status === s).length
-  const emptyCount = rows.filter((r) => r.invalid === 'empty').length
-  const dupCount = rows.filter((r) => r.invalid === 'duplicate').length
+  const stats = aggregateBulkStats(rows)
 
   const aoa: (string | number)[][] = [
     ['처리 요약', ''],
@@ -24,30 +56,21 @@ export function buildBulkSummary(
     ['처리 일시', meta.processedAt],
     ['', ''],
     ['구분', '건수'],
-    ['총 행수', rows.length],
-    [statusLabels.success, count('success')],
-    [statusLabels.notfound, count('notfound')],
-    [statusLabels.error, count('error')],
+    ['총 행수', stats.total],
+    [statusLabels.success, stats.counts.success],
+    [statusLabels.notfound, stats.counts.notfound],
+    [statusLabels.error, stats.counts.error],
   ]
-  const pending = count('pending')
-  if (pending) aoa.push([statusLabels.pending, pending])
-  if (emptyCount) aoa.push(['입력 오류(빈값)', emptyCount])
-  if (dupCount) aoa.push(['중복 입력(결과는 동일 처리)', dupCount])
+  if (stats.counts.pending) aoa.push([statusLabels.pending, stats.counts.pending])
+  if (stats.emptyCount) aoa.push(['입력 오류(빈값)', stats.emptyCount])
+  if (stats.dupCount) aoa.push(['중복 입력(결과는 동일 처리)', stats.dupCount])
 
-  // 실패·미매칭 사유 분포 — errorMsg 기준 집계
-  const reasons = new Map<string, number>()
-  for (const r of rows) {
-    if ((r.status === 'notfound' || r.status === 'error') && r.errorMsg) {
-      reasons.set(r.errorMsg, (reasons.get(r.errorMsg) ?? 0) + 1)
-    }
-  }
-  if (reasons.size) {
-    const sorted = [...reasons.entries()].sort((a, b) => b[1] - a[1])
+  if (stats.reasons.length) {
     aoa.push(['', ''], ['실패·미매칭 사유', '건수'])
-    for (const [msg, n] of sorted.slice(0, REASON_LIMIT)) aoa.push([msg, n])
-    const rest = sorted.slice(REASON_LIMIT)
+    for (const { msg, count } of stats.reasons.slice(0, REASON_LIMIT)) aoa.push([msg, count])
+    const rest = stats.reasons.slice(REASON_LIMIT)
     if (rest.length) {
-      aoa.push([`기타 (사유 ${rest.length}종)`, rest.reduce((sum, [, n]) => sum + n, 0)])
+      aoa.push([`기타 (사유 ${rest.length}종)`, rest.reduce((sum, r) => sum + r.count, 0)])
     }
   }
   return aoa

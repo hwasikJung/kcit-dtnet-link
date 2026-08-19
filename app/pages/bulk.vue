@@ -11,10 +11,11 @@ import {
 import { parseBulkSheet, pasteToAoa } from '~/lib/bulk-parse'
 import { buildBulkSummary } from '~/lib/bulk-summary'
 import { parseBulkHistoryFile, serializeBulkHistory } from '~/lib/history-io'
-import { extractRegionCandidates, type RegionCandidate } from '~/lib/keygen'
+import { extractAddrMatchCols, extractRegionCandidates, type RegionCandidate } from '~/lib/keygen'
 import {
   KEYGEN_COLUMNS,
   flattenKeygenResult,
+  mergeAddrMatchCols,
   mergeStdLinkCols,
   parseAddrSheet,
 } from '~/lib/keygen-bulk'
@@ -85,6 +86,7 @@ const MODES: Record<
       '/sqiapi/addr/building_match_clean_union',
       '/sqiapi/addr/asis/juso',
       '/sqiapi/addr/std_link_key',
+      '/sqiapi/addr/addr_match',
     ],
   },
 }
@@ -117,6 +119,46 @@ const etaText = computed(() => {
   return `약 ${Math.ceil(sec / 60)}분 남음`
 })
 
+// 결과 테이블 상태 칩 필터 — 다운로드에도 같은 필터를 적용한다(라이브·이력 Modal 각각)
+const statusFilter = ref<BulkRow['status'] | 'all'>('all')
+const historyFilter = ref<BulkRow['status'] | 'all'>('all')
+/** 상태 라벨 — 탭(처리 종류)별 재정의 반영 */
+function statusLabelOf(kind: BulkMode, s: BulkRow['status']) {
+  return {
+    pending: '대기',
+    success: '성공',
+    notfound: '미존재',
+    error: '실패',
+    ...MODES[kind].statusLabels,
+  }[s]
+}
+/** 필터 적용 다운로드 대상·파일명 — 필터가 걸려 있으면 해당 상태 행만, 파일명에 상태 라벨 표기 */
+function filteredDownload(
+  target: BulkRow[],
+  baseName: string,
+  kind: BulkMode,
+  filter: BulkRow['status'] | 'all',
+) {
+  if (filter === 'all') return { rows: target, name: baseName }
+  return {
+    rows: target.filter((r) => r.status === filter),
+    name: `${baseName.replace(/\.[^.]+$/, '')}_${statusLabelOf(kind, filter)}`,
+  }
+}
+const liveDownload = computed(() =>
+  filteredDownload(rows.value, fileName.value, mode.value, statusFilter.value),
+)
+const historyDownload = computed(() =>
+  historyRecord.value
+    ? filteredDownload(
+        historyRecord.value.rows,
+        historyRecord.value.fileName,
+        kindOf(historyRecord.value),
+        historyFilter.value,
+      )
+    : { rows: [], name: '' },
+)
+
 const detailRow = ref<BulkRow | null>(null)
 const detailKind = ref<BulkMode>('keygen')
 const detailOpen = ref(false)
@@ -139,13 +181,15 @@ function switchMode(next: BulkMode) {
   pasteText.value = ''
   colSelectOpen.value = false
   excludedCols.value = new Set()
+  statusFilter.value = 'all'
 }
 
 const validCount = computed(() => rows.value.filter((r) => !r.invalid).length)
-// 재시도 대상 = 처리 실패 행 (A열 빈값 등 입력 오류 행은 제외)
-const retryCount = computed(
-  () => rows.value.filter((r) => r.status === 'error' && r.invalid !== 'empty').length,
-)
+// 재시도 대상 = 처리 실패 + 매칭 실패(미존재) 행 (A열 빈값 등 입력 오류 행은 제외)
+// — 매칭 실패도 서버 데이터 갱신·유사 주소 재조회 개선으로 결과가 달라질 수 있어 포함한다
+const isRetryable = (r: BulkRow) =>
+  (r.status === 'error' || r.status === 'notfound') && r.invalid !== 'empty'
+const retryCount = computed(() => rows.value.filter(isRetryable).length)
 const summary = computed(() => ({
   success: rows.value.filter((r) => r.status === 'success').length,
   notfound: rows.value.filter((r) => r.status === 'notfound').length,
@@ -166,7 +210,7 @@ onBeforeRouteLeave(() => {
 })
 
 async function downloadSample() {
-  const XLSX = await import('xlsx')
+  const XLSX = await import('xlsx-js-style')
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cfg.value.sample), '샘플')
   XLSX.writeFile(wb, cfg.value.sampleName)
@@ -179,7 +223,7 @@ async function onFileChange(ev: Event) {
   // 실행 중 새 파일을 적용하면 진행 중인 워커가 교체된 행 목록에 결과를 덮어써 데이터가 섞인다
   if (running.value || !file) return
 
-  const XLSX = await import('xlsx')
+  const XLSX = await import('xlsx-js-style')
   let aoa: unknown[][]
   try {
     const wb = XLSX.read(await file.arrayBuffer())
@@ -256,7 +300,38 @@ async function lookupOne(
           () => [] as RegionCandidate[],
         ),
       ])
-      const flat = flattenKeygenResult(raw, regions)
+      let flat = flattenKeygenResult(raw, regions)
+      let effectiveRaw: unknown = raw
+      // 유사 주소 자동 재조회 — 서버가 오류에 유사 주소를 알려준 케이스는 그 주소로 1회
+      // 재시도하고, 성공하면 "유사 주소 매칭" 컬럼에 사용한 주소를 태그로 남긴다.
+      // 재시도 실패 시 원래 실패 사유 유지(fail-open). 다지역 모호 행은 similarAddr가 없어 제외
+      if (flat.status === 'notfound' && flat.similarAddr) {
+        const retryRaw = await $fetch(apiBase + '/sqiapi/addr/building_match_clean_union', {
+          query: { input_addr: flat.similarAddr },
+          timeout: 5000,
+        }).catch(() => null)
+        if (retryRaw) {
+          const retryFlat = flattenKeygenResult(retryRaw)
+          if (retryFlat.status === 'success') {
+            retryFlat.cols.similar_addr = flat.similarAddr
+            flat = retryFlat
+            effectiveRaw = retryRaw
+          }
+        }
+      }
+      // 매칭 실패 행 주소 정보 보강 — 대장 PK가 없어도 addr_match(주소매칭)로 도로명주소·
+      // 지번주소·건물명·우편번호를 채운다(2026-08-19 실측: 실패 주소도 주소 정보는 반환).
+      // 다지역 모호 행은 제외 — addr_match가 한 지역만 골라 주므로 채우면 오도. 실패 시 보강만 생략
+      if (flat.status === 'notfound' && regions.length <= 1) {
+        const addrCols = await $fetch(apiBase + '/sqiapi/addr/addr_match', {
+          query: { input_addr: key },
+          timeout: 5000,
+        }).then(
+          (d) => extractAddrMatchCols(d),
+          () => ({}) as Record<string, string>,
+        )
+        mergeAddrMatchCols(flat.cols, addrCols)
+      }
       // PK기반 탭과 동일한 표준연계키 조회 값을 함께 제공 — 대표 PK(총괄 첫 건, 없으면 첫
       // 표제부)로 std_link_key를 후속 조회해 병합한다. 총괄 PK가 비어 있으면 소속 총괄
       // (mgm_upper_bld_pk) 보강도 병합에서 함께 처리. 실패 시 병합만 생략(fail-open)
@@ -270,10 +345,30 @@ async function lookupOne(
             (d) => flattenStdLinkKey(d).cols,
             () => null,
           )
+          // PK 조회는 해당 레코드 1건만 오므로(실측) 대표가 총괄이면 표제부 신규 PK가 비어 있다 —
+          // 표준연계키로 그룹(총괄+표제부)을 1회 재조회해 대장종류별 신규 PK를 채운다. 실패 시 생략
+          if (std && !std.title_pk_new && std.std_link_key) {
+            const group = await $fetch(apiBase + '/sqiapi/addr/std_link_key', {
+              query: { std_link_key: std.std_link_key },
+              timeout: 5000,
+            }).then(
+              (d) => flattenStdLinkKey(d).cols,
+              () => null,
+            )
+            if (group?.title_pk_new) {
+              std.title_pk_new = group.title_pk_new
+              if (group.recap_pk_new) std.recap_pk_new = group.recap_pk_new
+            }
+          }
           if (std) mergeStdLinkCols(flat.cols, std)
         }
       }
-      return { raw, ...flat }
+      return {
+        raw: effectiveRaw,
+        status: flat.status,
+        cols: flat.cols,
+        errorMsg: flat.errorMsg,
+      }
     }
     // 입력 형식(표준연계키/기존 PK/신규 PK)에 맞는 쿼리 파라미터로 조회한다
     const raw = await $fetch(apiBase + '/sqiapi/addr/std_link_key', {
@@ -363,11 +458,7 @@ async function run() {
 
 async function retryFailed() {
   if (running.value) return
-  const keys = [
-    ...new Set(
-      rows.value.filter((r) => r.status === 'error' && r.invalid !== 'empty').map((r) => r.pk),
-    ),
-  ]
+  const keys = [...new Set(rows.value.filter(isRetryable).map((r) => r.pk))]
   if (!keys.length) return
   await executeLookups(keys)
   await saveRecord()
@@ -380,7 +471,7 @@ async function download(
   extras: string[],
   opts?: { columns?: { key: string; label: string }[]; processedAt?: number },
 ) {
-  const XLSX = await import('xlsx')
+  const XLSX = await import('xlsx-js-style')
   const c = MODES[kind]
   const columns = opts?.columns ?? c.columns
   const statusLabel = {
@@ -401,7 +492,19 @@ async function download(
     ]),
   ]
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '결과')
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  // 실패·미매칭 행의 상태 셀 색상 — 받은 파일에서 문제 행을 바로 구분 (엑셀 '나쁨' 스타일 색)
+  const statusCol = aoa[0]!.length - 1
+  const failStyle = {
+    fill: { fgColor: { rgb: 'FFC7CE' } },
+    font: { color: { rgb: '9C0006' } },
+  }
+  target.forEach((r, i) => {
+    if (r.status !== 'error' && r.status !== 'notfound') return
+    const cell = ws[XLSX.utils.encode_cell({ r: i + 1, c: statusCol })]
+    if (cell) cell.s = failStyle
+  })
+  XLSX.utils.book_append_sheet(wb, ws, '결과')
   // 상태 집계·실패 사유 분포 요약 시트 — 보고용으로 결과 파일 하나면 되도록 동봉
   const summaryAoa = buildBulkSummary(target, statusLabel, {
     fileName: baseName,
@@ -438,6 +541,7 @@ async function openHistory(meta: BulkHistoryMeta) {
     return
   }
   historyRecord.value = record
+  historyFilter.value = 'all'
   historyOpen.value = true
 }
 
@@ -467,6 +571,19 @@ async function removeHistory(meta: BulkHistoryMeta) {
   try {
     await history.remove(meta.id)
     toast('이력을 삭제했습니다.')
+  } catch {
+    toast('이력 삭제에 실패했습니다. (브라우저 저장소 확인)', 'error')
+  }
+}
+
+async function clearHistory() {
+  const count = history.items.value.length
+  // 원본 응답까지 담긴 이력이라 복구할 수 없다 — 삭제 전 확인
+  if (!window.confirm(`저장된 이력 ${count}건을 모두 삭제할까요? 삭제하면 되돌릴 수 없습니다.`))
+    return
+  try {
+    await history.clear()
+    toast('이력을 모두 삭제했습니다.')
   } catch {
     toast('이력 삭제에 실패했습니다. (브라우저 저장소 확인)', 'error')
   }
@@ -659,14 +776,22 @@ function formatDate(ts: number) {
           {{ cancelRequested ? '중단 중…' : '중단' }}
         </Button>
         <Button v-if="finished && retryCount" variant="outline" @click="retryFailed">
-          실패 {{ retryCount }}건 재시도
+          실패·{{ cfg.statusLabels.notfound ?? '미존재' }} {{ retryCount }}건 재시도
         </Button>
         <Button
           v-if="finished"
           variant="outline"
-          @click="download(rows, fileName, mode, extraHeaders, { columns: downloadColumns })"
+          :disabled="!liveDownload.rows.length"
+          @click="
+            download(liveDownload.rows, liveDownload.name, mode, extraHeaders, {
+              columns: downloadColumns,
+            })
+          "
         >
           결과 엑셀 다운로드
+          <template v-if="statusFilter !== 'all'">
+            ({{ statusLabelOf(mode, statusFilter) }} {{ liveDownload.rows.length }}건)
+          </template>
         </Button>
         <Button
           v-if="finished"
@@ -738,7 +863,16 @@ function formatDate(ts: number) {
       <h2 class="mb-3 text-sm font-medium text-muted-foreground">
         {{ finished ? '처리 결과 (행 클릭 시 상세)' : '업로드된 A열 목록' }}
       </h2>
+      <BulkResultDashboard
+        v-if="finished"
+        class="mb-4"
+        :rows="rows"
+        :status-labels="cfg.statusLabels"
+        :key-label="cfg.keyLabel"
+        @row-click="(row) => openDetail(row, mode)"
+      />
       <BulkResultTable
+        v-model:status-filter="statusFilter"
         :rows="rows"
         :columns="cfg.columns"
         :key-label="cfg.keyLabel"
@@ -777,6 +911,15 @@ function formatDate(ts: number) {
             aria-label="이력 파일 가져오기"
             @change="onImportHistory"
           />
+          <Button
+            variant="outline"
+            size="sm"
+            class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            :disabled="!history.items.value.length"
+            @click="clearHistory"
+          >
+            전체 삭제
+          </Button>
         </div>
       </div>
       <p
@@ -852,10 +995,11 @@ function formatDate(ts: number) {
             v-if="historyRecord"
             variant="outline"
             size="sm"
+            :disabled="!historyDownload.rows.length"
             @click="
               download(
-                historyRecord.rows,
-                historyRecord.fileName,
+                historyDownload.rows,
+                historyDownload.name,
                 kindOf(historyRecord),
                 historyRecord.extraHeaders ?? [],
                 { processedAt: historyRecord.createdAt },
@@ -863,10 +1007,22 @@ function formatDate(ts: number) {
             "
           >
             결과 엑셀 다운로드
+            <template v-if="historyFilter !== 'all'">
+              ({{ statusLabelOf(kindOf(historyRecord), historyFilter) }}
+              {{ historyDownload.rows.length }}건)
+            </template>
           </Button>
         </div>
+        <BulkResultDashboard
+          v-if="historyRecord"
+          :rows="historyRecord.rows"
+          :status-labels="MODES[kindOf(historyRecord)].statusLabels"
+          :key-label="MODES[kindOf(historyRecord)].keyLabel"
+          @row-click="(row) => openDetail(row, kindOf(historyRecord!))"
+        />
         <BulkResultTable
           v-if="historyRecord"
+          v-model:status-filter="historyFilter"
           :rows="historyRecord.rows"
           :columns="MODES[kindOf(historyRecord)].columns"
           :key-label="MODES[kindOf(historyRecord)].keyLabel"

@@ -99,16 +99,19 @@ export function parseStdLinkKeyStructure(input: string): StdLinkKeyParts | null 
   return null
 }
 
-/** 표준연계키 조회 결과의 B열~ 표시 컬럼 (선정·순서·한글명은 이 모듈에서만 관리) */
+/** 표준연계키 조회 결과의 B열~ 표시 컬럼 (선정·순서·한글명은 이 모듈에서만 관리).
+ * 신규 PK는 대장종류별로 나눠 담는다 — 총괄=단지 PK, 표제부=건물 PK 용도 구분 */
 export const STD_LINK_COLUMNS: { key: string; label: string }[] = [
   { key: 'std_link_key', label: '표준연계키' },
   { key: 'regstr_kind', label: '대장종류' },
   { key: 'mgm_bld_pk', label: '기존 PK' },
-  { key: 'mgm_bld_pk_new', label: '신규 PK' },
+  { key: 'recap_pk_new', label: '총괄 신규 PK' },
+  { key: 'title_pk_new', label: '표제부 신규 PK' },
   { key: 'bld_nm', label: '건물명' },
   { key: 'plat_addr', label: '지번주소' },
   { key: 'road_plat_addr', label: '도로명주소' },
   { key: 'pnu', label: 'PNU' },
+  { key: 'kma_obsrvn_cd', label: '기상관측소 코드' },
   { key: 'mgm_upper_bld_pk', label: '소속 총괄 PK' },
 ]
 
@@ -177,6 +180,8 @@ export interface StdLinkRow {
   /** 도로명주소 우선, 없으면 지번주소 */
   addr: string
   pnu: string
+  /** 기상관측소 코드 (kma_obsrvn_cd) */
+  kmaObsrvnCd: string
 }
 
 /**
@@ -195,6 +200,7 @@ export function extractStdLinkRows(data: unknown): StdLinkRow[] {
       bldNm: String(r.bld_nm ?? '').trim(),
       addr: String(r.road_plat_addr ?? '').trim() || String(r.plat_addr ?? '').trim(),
       pnu: String(r.pnu ?? '').trim(),
+      kmaObsrvnCd: String(r.kma_obsrvn_cd ?? '').trim(),
     }
   })
   return [
@@ -229,6 +235,13 @@ export function flattenStdLinkKey(data: unknown): {
       if (c.key === 'regstr_kind') {
         const gb = String(r.regstr_kind_gb ?? '').trim()
         return gb ? (REGSTR_KIND_LABEL[gb] ?? gb) : ''
+      }
+      // 신규 PK는 대장종류별 파생 컬럼 — 총괄(R)/표제부(T) 레코드의 mgm_bld_pk_new를 나눠 담는다
+      if (c.key === 'recap_pk_new' || c.key === 'title_pk_new') {
+        const gb = String(r.regstr_kind_gb ?? '').trim()
+        if (gb !== (c.key === 'recap_pk_new' ? 'R' : 'T')) return ''
+        const v = r.mgm_bld_pk_new
+        return v == null ? '' : String(v).trim()
       }
       const v = r[c.key]
       return v == null ? '' : String(v).trim()

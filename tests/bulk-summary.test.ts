@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBulkSummary } from '~/lib/bulk-summary'
+import { aggregateBulkStats, buildBulkSummary } from '~/lib/bulk-summary'
 import type { BulkRow, BulkRowStatus } from '~/types/bulk'
 
 const LABELS: Record<BulkRowStatus, string> = {
@@ -18,6 +18,35 @@ function row(over: Partial<BulkRow>): BulkRow {
 function cell(aoa: (string | number)[][], name: string) {
   return aoa.find((r) => r[0] === name)?.[1]
 }
+
+describe('aggregateBulkStats', () => {
+  it('상태·입력 오류·사유 분포를 집계한다', () => {
+    const stats = aggregateBulkStats([
+      row({ status: 'success' }),
+      row({ status: 'success', invalid: 'duplicate' }),
+      row({ status: 'notfound', errorMsg: '사유A' }),
+      row({ status: 'notfound', errorMsg: '사유A' }),
+      row({ status: 'error', invalid: 'empty', errorMsg: '사유B' }),
+      row({ status: 'pending' }),
+    ])
+    expect(stats.total).toBe(6)
+    expect(stats.counts).toEqual({ pending: 1, success: 2, notfound: 2, error: 1 })
+    expect(stats.emptyCount).toBe(1)
+    expect(stats.dupCount).toBe(1)
+    // 사유는 건수 내림차순, 성공 행의 errorMsg는 무시
+    expect(stats.reasons).toEqual([
+      { msg: '사유A', count: 2 },
+      { msg: '사유B', count: 1 },
+    ])
+  })
+
+  it('빈 목록이면 전부 0', () => {
+    const stats = aggregateBulkStats([])
+    expect(stats.total).toBe(0)
+    expect(stats.counts).toEqual({ pending: 0, success: 0, notfound: 0, error: 0 })
+    expect(stats.reasons).toEqual([])
+  })
+})
 
 describe('buildBulkSummary', () => {
   it('파일·일시·상태별 건수를 집계한다', () => {

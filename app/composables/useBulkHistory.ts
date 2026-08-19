@@ -76,5 +76,10 @@ export function useBulkHistory() {
     await refresh()
   }
 
-  return { items, refresh, save, get, remove }
+  async function clear() {
+    await txRequest((s) => s.clear(), 'readwrite')
+    await refresh()
+  }
+
+  return { items, refresh, save, get, remove, clear }
 }

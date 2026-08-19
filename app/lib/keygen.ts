@@ -242,6 +242,17 @@ export function parseKeygenResponse(data: unknown): KeygenParse {
         similarAddr: (similar[1]!.split('|')[0] ?? '').trim(),
       }
     }
+    // "a similar road address matched. but not return <도로명주소>" — 유사 도로명주소는 매칭됐지만
+    // 결과가 반환되지 않은 케이스(2026-08-19 실측: 해당 주소로 재조회하면 정상 매칭된다)
+    const similarRoad = /a similar road address matched\.?\s*but not return\s+(.+)/.exec(d.error)
+    if (similarRoad) {
+      return {
+        ok: false,
+        message: '유사한 도로명주소를 찾았습니다 — 해당 주소로 다시 시도하면 매칭될 수 있습니다.',
+        cleanAddr,
+        similarAddr: similarRoad[1]!.trim(),
+      }
+    }
     return { ok: false, message: '주소와 일치하는 건축물대장을 찾지 못했습니다.', cleanAddr }
   }
 
@@ -270,6 +281,56 @@ export function parseKeygenResponse(data: unknown): KeygenParse {
       legalCode: `${String(d.sigungu_cd ?? '').trim()}${String(d.bjdong_cd ?? '').trim()}`,
     },
   }
+}
+
+/**
+ * union 응답의 주소·PNU·등급 부가 정보 — 일괄 생성의 매칭 실패 행 보강용(있는 값만 담는다).
+ * PK가 없는 실패(M3 등)에도 정제·매칭된 주소 정보는 응답에 있어 결과 컬럼을 채울 수 있다.
+ * PNU는 응답에 직접 없어 시군구(5)+법정동(5)+토지구분(1)+본번(4)+부번(4)으로 조립한다 —
+ * plat_gb_cd 0(대지)→1, 1(산)→2, 그 외 코드는 미조립(2026-08-19 실측: 방학동 668-7 PNU와 정합).
+ */
+export function extractMatchExtras(data: unknown): Record<string, string> {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return {}
+  const d = data as Record<string, unknown>
+  const out: Record<string, string> = {}
+  const platAddr = str(d.plat_addr)
+  if (platAddr) out.plat_addr = platAddr
+  const roadAddr = str(d.road_plat_addr)
+  if (roadAddr) out.road_plat_addr = roadAddr
+  const grade = [str(d.match_grade), str(d.match_level)].filter(Boolean).join(' · ')
+  if (grade) out.grade = grade
+  const sgg = str(d.sigungu_cd)
+  const bjd = str(d.bjdong_cd)
+  const gbCd = str(d.plat_gb_cd)
+  const gb = gbCd === '0' ? '1' : gbCd === '1' ? '2' : ''
+  const bun = str(d.bun)
+  const ji = str(d.ji)
+  if (sgg.length === 5 && bjd.length === 5 && gb && bun && ji) {
+    out.pnu = `${sgg}${bjd}${gb}${bun.padStart(4, '0')}${ji.padStart(4, '0')}`
+  }
+  return out
+}
+
+/**
+ * addr_match(주소매칭) 응답 → 주소 정보 컬럼 값. 매칭 실패 행의 주소 정보 보강에 사용 —
+ * 대장 PK는 없어도 도로명주소·지번주소·건물명·우편번호는 채울 수 있다(2026-08-19 실측).
+ * 미매칭도 HTTP 200 + error 형태일 수 있어 주소 필드가 없으면 빈 객체를 반환한다.
+ */
+export function extractAddrMatchCols(data: unknown): Record<string, string> {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return {}
+  const d = data as Record<string, unknown>
+  const out: Record<string, string> = {}
+  // roadAddr는 참조 표기("(대청동1가)")가 붙어 roadAddrPart1을 우선한다
+  const road = str(d.roadAddrPart1) || str(d.roadAddr)
+  if (road) out.road_plat_addr = road
+  // jibunAddr는 건물명이 붙을 수 있어(without_bldNm 실측) 순수 지번 필드를 우선한다
+  const jibun = str(d.jibunAddr_without_bldNm) || str(d.jibunAddr)
+  if (jibun) out.plat_addr = jibun
+  const bldNm = str(d.bdNm)
+  if (bldNm) out.bld_nm = bldNm
+  const zip = str(d.zipNo)
+  if (zip) out.zip_no = zip
+  return out
 }
 
 /**

@@ -2,7 +2,7 @@
 // 조회용(bulk-parse/bulk-columns)과 같은 BulkRow 구조를 쓰되, A열 의미가 PK가 아닌 주소다.
 import type { BulkRow } from '~/types/bulk'
 import { extraCells, extractExtraHeaders } from '~/lib/bulk-parse'
-import { parseKeygenResponse, type RegionCandidate } from '~/lib/keygen'
+import { extractMatchExtras, parseKeygenResponse, type RegionCandidate } from '~/lib/keygen'
 
 /** 1행 A열이 주소 표제(주소/도로명주소/address 등)이면 헤더로 간주한다 */
 export const ADDR_HEADER_PATTERN =
@@ -45,16 +45,20 @@ export function parseAddrSheet(aoa: unknown[][]): {
  * 기존 PK·소속 총괄 PK는 총괄표제부/표제부 PK 컬럼과 중복이라 제외 */
 export const KEYGEN_COLUMNS: { key: string; label: string }[] = [
   { key: 'clean_addr', label: '정제 주소' },
+  { key: 'similar_addr', label: '유사 주소 매칭' },
   { key: 'std_link_key', label: '표준연계키' },
   { key: 'regstr_kind', label: '대장종류' },
   { key: 'upper_pk', label: '총괄표제부 PK' },
   { key: 'pks', label: '표제부 PK' },
   { key: 'pk_count', label: '표제부 수' },
-  { key: 'mgm_bld_pk_new', label: '신규 PK' },
+  { key: 'recap_pk_new', label: '총괄 신규 PK' },
+  { key: 'title_pk_new', label: '표제부 신규 PK' },
   { key: 'bld_nm', label: '건물명' },
   { key: 'plat_addr', label: '지번주소' },
   { key: 'road_plat_addr', label: '도로명주소' },
+  { key: 'zip_no', label: '우편번호' },
   { key: 'pnu', label: 'PNU' },
+  { key: 'kma_obsrvn_cd', label: '기상관측소 코드' },
   { key: 'grade', label: '매칭 등급' },
 ]
 
@@ -62,11 +66,13 @@ export const KEYGEN_COLUMNS: { key: string; label: string }[] = [
 export const STD_LINK_MERGE_KEYS = [
   'std_link_key',
   'regstr_kind',
-  'mgm_bld_pk_new',
+  'recap_pk_new',
+  'title_pk_new',
   'bld_nm',
   'plat_addr',
   'road_plat_addr',
   'pnu',
+  'kma_obsrvn_cd',
 ] as const
 
 /** 대표 PK(총괄 첫 건, 없으면 첫 표제부)로 조회한 std_link_key 컬럼을 키 생성 결과에 병합.
@@ -76,6 +82,17 @@ export function mergeStdLinkCols(cols: Record<string, string>, std: Record<strin
     if (std[k]) cols[k] = std[k]
   }
   if (!cols.upper_pk && std.mgm_upper_bld_pk) cols.upper_pk = std.mgm_upper_bld_pk
+}
+
+/** 매칭 실패 행에 addr_match(주소매칭) 주소 정보를 보강 병합 — 대장 매칭이 채운 값이
+ * 우선이라 비어 있는 컬럼만 채운다(키는 여전히 없음, 주소 정보만 보강) */
+export function mergeAddrMatchCols(
+  cols: Record<string, string>,
+  addr: Record<string, string>,
+): void {
+  for (const k of ['road_plat_addr', 'plat_addr', 'bld_nm', 'zip_no']) {
+    if (!cols[k] && addr[k]) cols[k] = addr[k]
+  }
 }
 
 /** building_match_clean_union 응답 → 행 상태 + B열~ 표시 컬럼 값.
@@ -88,6 +105,8 @@ export function flattenKeygenResult(
   status: 'success' | 'notfound'
   cols: Record<string, string>
   errorMsg?: string
+  /** 서버가 알려준 유사 주소 — 일괄 처리에서 1회 자동 재조회에 사용 */
+  similarAddr?: string
 } {
   const p = parseKeygenResponse(data)
   if (regions && regions.length > 1) {
@@ -101,16 +120,22 @@ export function flattenKeygenResult(
     }
   }
   if (!p.ok) {
+    // PK는 없어도 응답의 주소·PNU·등급은 채운다 — 결과 엑셀에서 지번 기준 대조가 가능하게.
+    // 다지역 모호 케이스는 위에서 이미 반환됨(한 지역 값만 채우면 오도라 보강하지 않는다)
     return {
       status: 'notfound',
-      cols: { clean_addr: p.cleanAddr },
+      cols: { ...extractMatchExtras(data), clean_addr: p.cleanAddr },
       errorMsg: p.message,
+      similarAddr: p.similarAddr,
     }
   }
   const r = p.result
+  // 성공 행도 주소·PNU를 union 응답으로 선채움 — std_link_key 후속 조회가 실패(fail-open)해도
+  // 주소 컬럼이 비지 않게. 조회가 성공하면 병합(mergeStdLinkCols)이 조회 값으로 덮는다
   return {
     status: 'success',
     cols: {
+      ...extractMatchExtras(data),
       clean_addr: r.cleanAddr,
       upper_pk: r.upperPk,
       pks: r.pks.join(', '),

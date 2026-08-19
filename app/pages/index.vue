@@ -833,6 +833,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                   <th class="py-1.5 pr-3 font-medium">신규 PK</th>
                   <th class="py-1.5 pr-3 font-medium">건물명</th>
                   <th class="py-1.5 pr-3 font-medium">주소</th>
+                  <th class="py-1.5 pr-3 font-medium">기상관측소 코드</th>
                   <th class="py-1.5 font-medium"><span class="sr-only">대장 정보</span></th>
                 </tr>
               </thead>
@@ -847,6 +848,7 @@ function keySummary(item: { upperPk: string; pks: string[] }) {
                   <td class="py-1.5 pr-3 font-mono whitespace-nowrap">{{ r.mgmBldPkNew || '-' }}</td>
                   <td class="py-1.5 pr-3">{{ r.bldNm || '-' }}</td>
                   <td class="py-1.5 pr-3">{{ r.addr || '-' }}</td>
+                  <td class="py-1.5 pr-3 font-mono whitespace-nowrap">{{ r.kmaObsrvnCd || '-' }}</td>
                   <td class="py-1.5 text-right whitespace-nowrap">
                     <Button
                       v-if="r.mgmBldPk"

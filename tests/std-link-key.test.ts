@@ -24,6 +24,7 @@ const RECAP = {
   plat_addr: '서울특별시 종로구 관철동 12-1번지',
   road_plat_addr: '서울특별시 종로구 종로14길 20',
   pnu: '1111013500100120001',
+  kma_obsrvn_cd: '108',
 }
 const TITLE = {
   ...RECAP,
@@ -65,6 +66,7 @@ describe('extractStdLinkRows', () => {
       bldNm: '',
       addr: '서울특별시 종로구 종로14길 20',
       pnu: '1111013500100120001',
+      kmaObsrvnCd: '108',
     })
     expect(rows[1]!.kindLabel).toBe('표제부')
     expect(rows[1]!.bldNm).toBe('연빌리지')
@@ -91,6 +93,9 @@ describe('flattenStdLinkKey', () => {
     expect(r.cols.mgm_bld_pk).toBe('11110-2457')
     expect(r.cols.mgm_upper_bld_pk).toBe('11110-1')
     expect(r.cols.bld_nm).toBe('연빌리지')
+    // 표제부 레코드의 신규 PK는 표제부 컬럼에만 담긴다
+    expect(r.cols.recap_pk_new).toBe('')
+    expect(r.cols.title_pk_new).toBe('100212457')
   })
 
   it('다건 응답은 컬럼별 중복 제거 후 콤마로 잇는다', () => {
@@ -101,6 +106,9 @@ describe('flattenStdLinkKey', () => {
     expect(r.cols.mgm_bld_pk).toBe('11110-1, 11110-2457')
     // 빈 문자열(총괄의 건물명)은 제외되고 값이 있는 것만 남는다
     expect(r.cols.bld_nm).toBe('연빌리지')
+    // 신규 PK는 대장종류별로 나뉜다 — 총괄(R)=단지 PK, 표제부(T)=건물 PK
+    expect(r.cols.recap_pk_new).toBe('100211')
+    expect(r.cols.title_pk_new).toBe('100212457')
   })
 
   it('error 응답과 빈 배열은 미매칭으로 처리한다', () => {

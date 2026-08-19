@@ -21,9 +21,10 @@ const emit = defineEmits<{ rowClick: [row: BulkRow] }>()
 const PAGE_SIZE = 100
 const page = ref(1)
 
-// 상태 필터 — 요약 칩 클릭 시 해당 상태 행만 표시(다시 클릭하면 해제)
+// 상태 필터 — 요약 칩 클릭 시 해당 상태 행만 표시(다시 클릭하면 해제).
+// 부모가 v-model:status-filter로 받으면 다운로드 등에 같은 필터를 적용할 수 있다
 const FILTERABLE = ['success', 'notfound', 'error', 'pending'] as const
-const statusFilter = ref<BulkRow['status'] | 'all'>('all')
+const statusFilter = defineModel<BulkRow['status'] | 'all'>('statusFilter', { default: 'all' })
 const statusCount = computed(() => {
   const count: Record<BulkRow['status'], number> = { pending: 0, success: 0, notfound: 0, error: 0 }
   for (const row of props.rows) count[row.status]++
